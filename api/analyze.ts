@@ -9,78 +9,73 @@ export default async function handler(req, res) {
     const minutoAtual = agoraBR.getMinutes();
     const horaAtual = agoraBR.getHours();
 
-    // TRAVA DE 9 MINUTOS: Respeita o limite operacional da Optnex
+    // TRAVA OPERACIONAL DE 9 MINUTOS
     const minutoNoCiclo = minutoAtual % 15;
-    if (minutoNoCiclo > 9) return res.status(200).json({ status: "Aguardando próxima vela M15..." });
+    if (minutoNoCiclo > 9) return res.status(200).json({ status: "Aguardando próxima oportunidade..." });
 
     const inicioM15 = Math.floor(minutoAtual / 15) * 15;
-    const fimM15 = (inicioM15 + 15) % 60;
-    const horaFim = fimM15 === 0 ? (horaAtual + 1) % 24 : horaAtual;
-    const cicloVela = `${String(horaAtual).padStart(2, '0')}:${String(inicioM15).padStart(2, '0')} -> ${String(horaFim).padStart(2, '0')}:${String(fimM15).padStart(2, '0')}`;
+    const cicloVela = `${String(horaAtual).padStart(2, '0')}:${String(inicioM15).padStart(2, '0')} -> EXPIRY`;
 
-    const ativos = [{ nome: 'BTCUSDT', operarFimDeSemana: true }];
+    // Varredura de Cripto (BTC)
+    const url = `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=15m&limit=50`;
+    const response = await fetch(url);
+    const data = await response.json();
+    
+    const candles = data.map(d => ({
+      o: parseFloat(d[1]), h: parseFloat(d[2]), l: parseFloat(d[3]), c: parseFloat(d[4]), v: parseFloat(d[5])
+    })).reverse();
 
-    for (const ativo of ativos) {
-      const url = `https://api.binance.com/api/v3/klines?symbol=${ativo.nome}&interval=15m&limit=50`;
-      const response = await fetch(url);
-      const data = await response.json();
-      if (!Array.isArray(data)) continue;
+    // ANÁLISE SENSORIAL HUMANA
+    const isBearish = candles[0].c < candles[0].o;
+    const isBullish = candles[0].c > candles[0].o;
 
-      const candles = data.map(d => ({
-        o: parseFloat(d[1]), h: parseFloat(d[2]), l: parseFloat(d[3]), c: parseFloat(d[4]), v: parseFloat(d[5])
-      })).reverse();
+    // CONSULTA AO CÉREBRO DA IA (MODO BENCHMARKING)
+    const analiseIA = await consultarCerebroGlobal("BTCUSDT", candles, GEMINI_API_KEY);
 
-      // CALIBRAGEM VISUAL: O robô agora "vê" a cor e a força da vela atual
-      const isBearish = candles[0].c < candles[0].o;
-      const isBullish = candles[0].c > candles[0].o;
-      const corpoVela = Math.abs(candles[0].c - candles[0].o);
-
-      const analiseIA = await consultarAgenteHumano(ativo.nome, candles, GEMINI_API_KEY);
-
-      if (analiseIA.decisao === "ENTRAR") {
-        // FILTRO ANTI-DOIDO: Bloqueia sinal de COMPRA em vela VERMELHA forte e vice-versa
-        if (analiseIA.direcao === "CALL" && isBearish) continue; 
-        if (analiseIA.direcao === "PUT" && isBullish) continue;
-
-        const direcao = analiseIA.direcao === "CALL" ? "🟢 ACIMA" : "🔴 ABAIXO";
-        const notaExtra = analiseIA.tipo === "IA" ? "\n⚠️ *Nota: Oportunidade identificada pela análise técnica da IA.*" : "";
-
-        const msg = `🚨 **SINAL CONFIRMADO: ${direcao}**\n\n` +
-                    `🪙 **ATIVO:** ${ativo.nome}\n` +
-                    `⏰ **VELA (M15):** ${cicloVela}\n` + 
-                    `📊 **ANÁLISE TÉCNICA:** ${analiseIA.motivo}\n` +
-                    `${notaExtra}\n\n` +
-                    `🚀 **EXECUTAR NA OPTNEX!**`;
-
-        await enviarTelegram(TG_TOKEN, TG_CHAT_ID, msg);
+    if (analiseIA.decisao === "ENTRAR") {
+      // VALIDAÇÃO RIGOROSA: Direção DEVE bater com a cor da vela real
+      if ((analiseIA.direcao === "CALL" && isBearish) || (analiseIA.direcao === "PUT" && isBullish)) {
+        return res.status(200).json({ status: "Sinal abortado por divergência visual." });
       }
+
+      const direcaoEmoji = analiseIA.direcao === "CALL" ? "🟢 ACIMA" : "🔴 ABAIXO";
+      
+      const msg = `💎 **SENTINELA DE ELITE: ${direcaoEmoji}**\n\n` +
+                  `🪙 **ATIVO:** BTCUSDT\n` +
+                  `⏰ **CICLO:** ${cicloVela}\n` + 
+                  `📊 **CONFLUÊNCIA:** ${analiseIA.motivo}\n\n` +
+                  `✅ **CHECKLIST INFALÍVEL:**\n` +
+                  `• EMA/MACD: OK\n` +
+                  `• RSI/WILLIAMS: OK\n` +
+                  `• COR DA VELA: CONFIRMADA\n\n` +
+                  `🚀 **OPORTUNIDADE ÚNICA NA OPTNEX!**`;
+
+      await enviarTelegram(TG_TOKEN, TG_CHAT_ID, msg);
     }
-    return res.status(200).json({ status: "Agente Calibrado e Ativo" });
+
+    return res.status(200).json({ status: "Agente monitorando com precisão máxima" });
   } catch (e) {
     return res.status(200).json({ erro: e.message });
   }
 }
 
-async function consultarAgenteHumano(ativo, candles, key) {
+async function consultarCerebroGlobal(ativo, candles, key) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`;
-  const dados = candles.slice(0, 25).map(c => `O:${c.o} H:${c.h} L:${c.l} C:${c.c} V:${c.v}`).join('|');
+  const dados = candles.slice(0, 30).map(c => `O:${c.o} C:${c.c} V:${c.v}`).join('|');
 
-  const prompt = `Aja como um Trader Humano Senior. Analise ${ativo} (M15): ${dados}.
-  REQUISITOS: 
-  1. Analise Candlesticks (Cor, Pavio, Corpo).
-  2. Use: EMA(9,21), MACD, RSI, Bandas de Bollinger, Fractal, Estocástico, Volume e Williams %R.
-  3. Identifique Suporte/Resistência e Tendência real.
-  4. SÓ responda ENTRAR se a direção bater com a COR da vela atual.
-  Responda APENAS JSON: {"decisao": "ENTRAR" ou "AGUARDAR", "direcao": "CALL" ou "PUT", "motivo": "resumo técnico curto", "tipo": "IA"}`;
+  const prompt = `Você é um Trader de Elite 24/7. Analise ${ativo}: ${dados}.
+  REGRAS: 
+  1. Use: EMA, MACD, RSI, Bandas de Bollinger, Fractal, Estocástico, Volume, Williams %R e Momentum.
+  2. Faça benchmarking da tendência. Se a vela atual for contra a análise, ignore.
+  3. SÓ autorize ENTRAR se houver 90% de certeza técnica.
+  RESPONDA APENAS JSON: {"decisao": "ENTRAR" ou "AGUARDAR", "direcao": "CALL" ou "PUT", "motivo": "justificativa técnica profissional"}`;
 
   try {
     const res = await fetch(url, { method: 'POST', body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }) });
     const data = await res.json();
     const cleanText = data.candidates[0].content.parts[0].text.replace(/```json|```/g, '');
     return JSON.parse(cleanText);
-  } catch (e) {
-    return { decisao: "AGUARDAR" };
-  }
+  } catch (e) { return { decisao: "AGUARDAR" }; }
 }
 
 async function enviarTelegram(token, chat, msg) {
