@@ -1,0 +1,5 @@
+{
+  "name": "RICARDO TRADER",
+  "description": "Real-time binary options signal generator for BTC/USD and EUR/USD using Gemini AI analysis and Telegram notifications.",
+  "requestFramePermissions": []
+}
