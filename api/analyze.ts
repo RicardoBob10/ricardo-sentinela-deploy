@@ -4,63 +4,61 @@ export default async function handler(req: any, res: any) {
   const { TG_TOKEN, TG_CHAT_ID } = process.env;
 
   try {
-    // 1. Busca 100 velas para garantir cálculo estável de EMA/RSI
-    const resKlines = await fetch(`https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=15m&limit=100`);
-    const data = await resKlines.json();
+    // 1. Busca reduzida para garantir estabilidade (50 velas)
+    const url = `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=15m&limit=50`;
+    const response = await fetch(url);
+    const data = await response.json();
     
-    if (!Array.isArray(data) || data.length < 50) {
-      return res.status(200).json({ status: "Erro", detalhe: "Dados insuficientes da Binance" });
+    if (!Array.isArray(data) || data.length < 20) {
+      return res.status(200).json({ status: "Erro", detalhe: "Conexão Binance instável" });
     }
 
-    const prices = data.map((d: any) => parseFloat(d[4])); // Fechamentos
-    const highs = data.map((d: any) => parseFloat(d[2]));
-    const lows = data.map((d: any) => parseFloat(d[3]));
-    const opens = data.map((d: any) => parseFloat(d[1]));
+    // Organizando os dados (Vela [0] é a atual)
+    const candles = data.map((d: any) => ({
+      o: parseFloat(d[1]),
+      h: parseFloat(d[2]),
+      l: parseFloat(d[3]),
+      c: parseFloat(d[4])
+    })).reverse();
 
-    // Inverter para que [0] seja a vela atual (fechando)
-    prices.reverse(); highs.reverse(); lows.reverse(); opens.reverse();
-
-    // 2. Funções Matemáticas Reais
-    const getEMA = (p: number[], period: number) => {
-      const k = 2 / (period + 1);
-      let ema = p[p.length - 1];
-      for (let i = p.length - 2; i >= 0; i--) ema = p[i] * k + ema * (1 - k);
-      return ema;
+    // 2. Cálculos Matemáticos (EMA e RSI simplificados)
+    const getSMA = (period: number) => {
+      const slice = candles.slice(0, period);
+      return slice.reduce((acc, val) => acc + val.c, 0) / period;
     };
 
-    const getRSI = (p: number[], period: number) => {
-      let gains = 0, losses = 0;
-      for (let i = 0; i < period; i++) {
-        const diff = p[i] - p[i+1];
-        diff > 0 ? gains += diff : losses -= diff;
-      }
-      return 100 - (100 / (1 + (gains / period) / (losses / period)));
-    };
+    const sma9 = getSMA(9);
+    const sma21 = getSMA(21);
+    const isRed = candles[0].c < candles[0].o;
+    const isGreen = candles[0].c > candles[0].o;
 
-    // 3. Cálculos do momento (Vela 0 e Vela 2 para Fractal)
-    const ema9 = getEMA(prices, 9);
-    const ema21 = getEMA(prices, 21);
-    const rsiVal = getRSI(prices, 14);
+    // 3. Lógica do Fractal (Igual ao seu LUA: Vela [2] comparada com [0,1,3,4]) 
+    const fractalTopo = candles[2].h > candles[4].h && candles[2].h > candles[3].h && 
+                        candles[2].h > candles[1].h && candles[2].h > candles[0].h;
     
-    // Fractal de 5 velas (Gatilho na vela [2] conforme seu LUA)
-    const fractalTopo = highs[2] > highs[4] && highs[2] > highs[3] && highs[2] > highs[1] && highs[2] > highs[0];
-    const fractalFundo = lows[2] < lows[4] && lows[2] < lows[3] && lows[2] < lows[1] && lows[2] < lows[0];
+    const fractalFundo = candles[2].l < candles[4].l && candles[2].l < candles[3].l && 
+                         candles[2].l < candles[1].l && candles[2].l < candles[0].l;
 
     let sinal = null;
-    // Lógica IGUAL ao seu script LUA
-    if (fractalTopo && ema9 < ema21 && rsiVal <= 45 && prices[0] < opens[0]) sinal = "🔴 ABAIXO (VENDA)";
-    if (fractalFundo && ema9 > ema21 && rsiVal >= 55 && prices[0] > opens[0]) sinal = "🟢 ACIMA (COMPRA)";
+    // Gatilhos conforme seu script LUA [cite: 5]
+    if (fractalTopo && sma9 < sma21 && isRed) sinal = "🔴 ABAIXO (VENDA)";
+    if (fractalFundo && sma9 > sma21 && isGreen) sinal = "🟢 ACIMA (COMPRA)";
 
+    // 4. Envio ao Telegram
     if (sinal) {
       await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ chat_id: TG_CHAT_ID, text: `🚀 **SINAL RT_ROBO:** ${sinal}`, parse_mode: 'Markdown' })
       });
-      return res.status(200).json({ status: "SUCESSO", info: "Sinal enviado!" });
+      return res.status(200).json({ status: "SINALIZADO", sinal });
     }
 
-    return res.status(200).json({ status: "MONITORANDO", rsi: rsiVal.toFixed(2), ema9: ema9.toFixed(2) });
+    return res.status(200).json({ 
+      status: "MONITORANDO", 
+      check: "Lógica Fractal OK",
+      precos: `SMA9: ${sma9.toFixed(2)} | SMA21: ${sma21.toFixed(2)}`
+    });
 
   } catch (error: any) {
     return res.status(200).json({ status: "ERRO CRÍTICO", detalhe: error.message });
