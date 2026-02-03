@@ -7,14 +7,21 @@ export default async function handler(req: any, res: any) {
     const response = await fetch(`https://api.kucoin.com/api/v1/market/candles?symbol=BTC-USDT&type=1min`);
     const result = await response.json();
     const candles = result.data.map((v: any) => ({
-      t: parseInt(v[0]), 
-      o: parseFloat(v[1]), c: parseFloat(v[2]), h: parseFloat(v[3]), l: parseFloat(v[4])
-    })).slice(0, 30);
+      t: parseInt(v[0]), o: parseFloat(v[1]), c: parseFloat(v[2]), h: parseFloat(v[3]), l: parseFloat(v[4])
+    })).slice(0, 40);
 
-    // Converte horário para Brasília (UTC-3)
-    const dataVela = new Date(candles[0].t * 1000);
-    const horaBrasilia = dataVela.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo' }).slice(0, 5);
+    // --- CÁLCULO RSI 14 ---
+    const calculateRSI = (data: any[], period: number) => {
+      let gains = 0, losses = 0;
+      for (let i = data.length - period; i < data.length; i++) {
+        const diff = data[i].c - data[i-1].c;
+        if (diff >= 0) gains += diff; else losses -= diff;
+      }
+      const rs = (gains / period) / (losses / period);
+      return 100 - (100 / (1 + rs));
+    };
 
+    // --- CÁLCULO EMAs ---
     const getEMA = (p: number) => {
       const k = 2 / (p + 1);
       let val = candles[candles.length - 1].c;
@@ -22,26 +29,34 @@ export default async function handler(req: any, res: any) {
       return val;
     };
 
+    const rsiVal = calculateRSI(candles.reverse(), 14); // Reverte para ordem cronológica
     const ema9 = getEMA(9);
     const ema21 = getEMA(21);
+    const c = candles; // Simplifica referência
 
-    // Lógica Fractal Exata do Script 
-    const f_topo = candles[2].h > candles[4].h && candles[2].h > candles[3].h && candles[2].h > candles[1].h && candles[2].h > candles[0].h;
-    const f_fundo = candles[2].l < candles[4].l && candles[2].l < candles[3].l && candles[2].l < candles[1].l && candles[2].l < candles[0].l;
+    // FRACTAL (Vela 2 é o extremo das 5)
+    const f_topo = c[2].h > c[4].h && c[2].h > c[3].h && c[2].h > c[1].h && c[2].h > c[0].h;
+    const f_fundo = c[2].l < c[4].l && c[2].l < c[3].l && c[2].l < c[1].l && c[2].l < c[0].l;
 
     let sinal = null;
-    if (f_topo && ema9 < ema21) sinal = "🔴 ABAIXO";
-    if (f_fundo && ema9 > ema21) sinal = "🟢 ACIMA";
+
+    // APLICAÇÃO DOS FILTROS DO SCRIPT RT_ROBO
+    if (f_topo && ema9 < ema21 && rsiVal <= 45) {
+        sinal = `🔴 **VENDA (ABAIXO)**\n📊 RSI: ${rsiVal.toFixed(2)}`;
+    }
+    if (f_fundo && ema9 > ema21 && rsiVal >= 55) {
+        sinal = `🟢 **COMPRA (ACIMA)**\n📊 RSI: ${rsiVal.toFixed(2)}`;
+    }
 
     if (sinal) {
-      const msg = `💎 **RT_ROBO SINAL**\n\n🎯 Direção: ${sinal}\n⏰ Vela: ${horaBrasilia}\n✅ Confirmado na Optnex`;
+      const hora = new Date(c[0].t * 1000).toLocaleTimeString('pt-BR', {timeZone: 'America/Sao_Paulo'}).slice(0,5);
       await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: TG_CHAT_ID, text: msg })
+        body: JSON.stringify({ chat_id: TG_CHAT_ID, text: `💎 **SINAL CONFIRMADO**\n${sinal}\n⏰ Vela: ${hora}` })
       });
     }
 
-    return res.status(200).json({ status: "Sincronizado", vela_atual: horaBrasilia });
+    return res.status(200).json({ status: "Filtros Ativos", rsi: rsiVal.toFixed(2) });
   } catch (e) { return res.status(200).send("Erro"); }
 }
