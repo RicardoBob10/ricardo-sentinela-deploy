@@ -1,8 +1,8 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 
 const DOC_CONTROL = {
-    versao: "v2.0.6",
-    revisao: "06",
+    versao: "v2.0.7",
+    revisao: "07",
     data_revisao: "03/02/2026",
     hora_revisao: "21:58",
     status: "ATIVO"
@@ -38,7 +38,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         const i = candles.length - 1;
         const calculateRSI = (d: any[], p: number) => {
-          if (d.length <= p) return 50;
           let g = 0, l = 0;
           for (let j = d.length - p; j < d.length; j++) {
             const diff = d[j].c - d[j-1].c;
@@ -63,7 +62,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const fF = candles[i-2].l < candles[i-4].l && candles[i-2].l < candles[i-3].l && candles[i-2].l < candles[i-1].l && candles[i-2].l < candles[i].l;
 
         let s = null;
-        // FILTRO DE INCLINAÇÃO APLICADO AQUI:
         if (fT && ema9 < ema21 && rsiVal <= 45 && rsiVal < rsiAnterior && candles[i].c < candles[i].o) s = "🔴 ABAIXO";
         if (fF && ema9 > ema21 && rsiVal >= 55 && rsiVal > rsiAnterior && candles[i].c > candles[i].o) s = "🟢 ACIMA";
 
