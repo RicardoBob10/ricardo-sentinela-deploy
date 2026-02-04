@@ -2,10 +2,10 @@ import { VercelRequest, VercelResponse } from '@vercel/node';
 
 // --- CONTROLE DE DOCUMENTAÇÃO (ISO 9001) ---
 const DOC_CONTROL = {
-    versao: "v2.0.1",
-    revisao: "01",
-    data_revisao: "03/02/2026", // Data atualizada para o ano atual
-    hora_revisao: "21:35",
+    versao: "v2.0.2",
+    revisao: "02",
+    data_revisao: "03/02/2026",
+    hora_revisao: "21:30",
     status: "HOMOLOGADO"
 };
 
@@ -23,7 +23,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { TG_TOKEN, TG_CHAT_ID } = process.env;
 
   try {
-    // Processamento em segundo plano para não dar Timeout (Erro 500)
     for (const ativo of ATIVOS) {
       try {
         let candles = [];
@@ -80,7 +79,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       } catch (e) { continue; }
     }
 
-    // --- PAINEL VISUAL SENTINELA (ISO 9001) ---
     res.setHeader('Content-Type', 'text/html');
     return res.status(200).send(`
       <!DOCTYPE html>
@@ -89,27 +87,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           <meta charset="UTF-8">
           <title>SENTINELA ATIVO - ${DOC_CONTROL.versao}</title>
           <style>
-              body { background-color: #050505; color: #00ff00; font-family: 'Courier New', Courier, monospace; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-              .panel { text-align: center; border: 2px solid #00ff00; padding: 40px; border-radius: 15px; box-shadow: 0 0 30px rgba(0, 255, 0, 0.2); max-width: 500px; }
-              .title { font-size: 2.2rem; font-weight: bold; margin: 15px 0; letter-spacing: 2px; }
-              .emojis { font-size: 2.5rem; margin: 10px 0; }
-              .info { background: #111; padding: 10px; border-radius: 5px; margin: 20px 0; font-size: 0.9rem; border: 1px solid #222; }
-              .footer { margin-top: 30px; font-size: 0.75rem; color: #444; border-top: 1px solid #222; padding-top: 15px; line-height: 1.6; }
-              .blink { animation: blinker 1.5s linear infinite; }
-              @keyframes blinker { 50% { opacity: 0; } }
+              body { background-color: #020202; color: #00ff00; font-family: 'Courier New', Courier, monospace; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; overflow: hidden; }
+              /* O Olho do Robô no Fundo */
+              .eye-bg {
+                  position: absolute; width: 300px; height: 300px;
+                  background: radial-gradient(circle, rgba(0,255,0,0.2) 0%, rgba(0,0,0,0) 70%);
+                  border-radius: 50%; border: 2px solid rgba(0,255,0,0.1);
+                  box-shadow: inset 0 0 50px rgba(0,255,0,0.2);
+                  display: flex; justify-content: center; align-items: center; z-index: -1;
+              }
+              .pupil { width: 40px; height: 40px; background: #00ff00; border-radius: 50%; box-shadow: 0 0 20px #00ff00; animation: scan 4s infinite ease-in-out; }
+              @keyframes scan { 0%, 100% { transform: scale(1); opacity: 0.8; } 50% { transform: scale(1.2); opacity: 1; } }
+              
+              .panel { text-align: center; border: 1px solid rgba(0,255,0,0.3); padding: 40px; border-radius: 10px; background: rgba(0,0,0,0.85); backdrop-filter: blur(5px); }
+              .title { font-size: 2rem; font-weight: bold; margin: 10px 0; letter-spacing: 4px; text-shadow: 0 0 10px #00ff00; }
+              .info { margin: 20px 0; font-size: 0.85rem; border: 1px solid #222; padding: 10px; color: #fff; }
+              .footer { margin-top: 30px; font-size: 0.7rem; color: #333; border-top: 1px solid #111; padding-top: 15px; }
+              .blink { animation: b 1.5s infinite; }
+              @keyframes b { 50% { opacity: 0; } }
           </style>
       </head>
       <body>
+          <div class="eye-bg"><div class="pupil"></div></div>
           <div class="panel">
-              <div class="emojis">🚀 🛡️ 🛰️</div>
               <div class="title">SENTINELA ATIVO</div>
-              <div class="emojis">🛰️ 🛡️ 🚀</div>
               <div class="info">
-                <span class="blink">●</span> MONITORANDO: BTCUSD + FOREX (M15)<br>
-                ESTADO: <span style="color:white">${DOC_CONTROL.status}</span>
+                <span class="blink" style="color:#00ff00">●</span> STATUS: ${DOC_CONTROL.status}<br>
+                SISTEMA: MULTI-ATIVOS M15
               </div>
               <div class="footer">
-                  CONTROLE DE DOCUMENTO - ISO 9001<br>
+                  ISO 9001 - DOCUMENTO CONTROLADO<br>
                   VERSÃO: ${DOC_CONTROL.versao} | REF: ${DOC_CONTROL.revisao}<br>
                   REVISADO EM ${DOC_CONTROL.data_revisao} às ${DOC_CONTROL.hora_revisao}
               </div>
@@ -117,7 +124,5 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       </body>
       </html>
     `);
-  } catch (e) {
-    return res.status(200).send("Erro de Inicialização Sentinela");
-  }
+  } catch (e) { return res.status(200).send("Erro"); }
 }
