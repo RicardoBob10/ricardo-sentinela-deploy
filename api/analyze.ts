@@ -1,18 +1,19 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 
 const DOC_CONTROL = {
-    versao: "v2.0.7",
-    revisao: "07",
+    versao: "v2.0.8",
+    revisao: "08",
     data_revisao: "03/02/2026",
-    hora_revisao: "21:58",
+    hora_revisao: "22:05",
     status: "ATIVO"
 };
 
 let lastSinais: Record<string, string> = {};
 const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
 
-const ATIVOS = [
-  { symbol: "BTC-USDT", label: "BTCUSD 🪙", source: "kucoin" },
+// Ativos separados por tipo para a gestão de horário
+const ATIVO_BTC = { symbol: "BTC-USDT", label: "BTCUSD 🪙", source: "kucoin" };
+const ATIVOS_FOREX = [
   { symbol: "EURUSD=X", label: "EURUSD 💱", source: "yahoo" },
   { symbol: "JPY=X", label: "USDJPY 💱", source: "yahoo" },
   { symbol: "GBPUSD=X", label: "GBPUSD 💱", source: "yahoo" }
@@ -21,8 +22,20 @@ const ATIVOS = [
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { TG_TOKEN, TG_CHAT_ID } = process.env;
 
+  // LÓGICA DE HORÁRIO MERCADO ABERTO (BR)
+  const agora = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Sao_Paulo"}));
+  const diaSemana = agora.getDay(); // 0 = Domingo, 5 = Sexta, 6 = Sábado
+  const hora = agora.getHours();
+
+  // Mercado Forex abre Domingo 18h e fecha Sexta 17h
+  const forexAberto = (diaSemana === 0 && hora >= 18) || 
+                      (diaSemana >= 1 && diaSemana <= 4) || 
+                      (diaSemana === 5 && hora < 17);
+
+  const ativosParaMonitorar = [...ATIVOS_FOREX.filter(() => forexAberto), ATIVO_BTC];
+
   try {
-    for (const ativo of ATIVOS) {
+    for (const ativo of ativosParaMonitorar) {
       try {
         let candles = [];
         if (ativo.source === "kucoin") {
@@ -45,7 +58,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
           return 100 - (100 / (1 + (g / l)));
         };
-
         const getEMA = (d: any[], p: number) => {
           const k = 2 / (p + 1);
           let val = d[0].c;
@@ -57,7 +69,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const rsiAnterior = calculateRSI(candles.slice(0, -1), 14);
         const ema9 = getEMA(candles, 9);
         const ema21 = getEMA(candles, 21);
-        
         const fT = candles[i-2].h > candles[i-4].h && candles[i-2].h > candles[i-3].h && candles[i-2].h > candles[i-1].h && candles[i-2].h > candles[i].h;
         const fF = candles[i-2].l < candles[i-4].l && candles[i-2].l < candles[i-3].l && candles[i-2].l < candles[i-1].l && candles[i-2].l < candles[i].l;
 
@@ -90,13 +101,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           <title>SENTINELA - ${DOC_CONTROL.versao}</title>
           <style>
               body { background-color: #020202; color: #00ff00; font-family: 'Courier New', Courier, monospace; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; overflow: hidden; }
-              .eye-bg { position: absolute; width: 350px; height: 350px; background: radial-gradient(circle, rgba(0,255,0,0.15) 0%, rgba(0,0,0,0) 70%); border-radius: 50%; display: flex; justify-content: center; align-items: center; z-index: -1; }
+              .eye-bg { position: absolute; width: 350px; height: 350px; background: radial-gradient(circle, rgba(0,255,0,0.1) 0%, rgba(0,0,0,0) 70%); border-radius: 50%; display: flex; justify-content: center; align-items: center; z-index: -1; }
               .pupil { width: 30px; height: 30px; background: #00ff00; border-radius: 50%; box-shadow: 0 0 15px #00ff00; animation: scan 3s infinite ease-in-out; }
               @keyframes scan { 0%, 100% { transform: scale(1); opacity: 0.6; } 50% { transform: scale(1.3); opacity: 0.9; } }
-              .panel { text-align: center; border: 1px solid rgba(0,255,0,0.4); padding: 50px; border-radius: 8px; background: rgba(0,0,0,0.9); box-shadow: 0 0 40px rgba(0,0,0,1); }
-              .title { font-size: 1.8rem; font-weight: bold; margin-bottom: 30px; letter-spacing: 2px; color: #fff; text-shadow: 0 0 8px #00ff00; }
-              .status-box { font-size: 1.1rem; color: #00ff00; font-weight: bold; margin: 20px 0; }
-              .footer { margin-top: 40px; font-size: 0.85rem; color: #888; border-top: 1px solid #333; padding-top: 20px; line-height: 1.5; }
+              .panel { text-align: center; border: 1px solid rgba(0,255,0,0.3); padding: 50px; border-radius: 8px; background: rgba(0,0,0,0.9); }
+              .title { font-size: 1.6rem; font-weight: bold; margin-bottom: 20px; color: #fff; text-shadow: 0 0 8px #00ff00; }
+              .status-box { font-size: 1rem; color: #00ff00; margin-bottom: 10px; }
+              .market-info { font-size: 0.8rem; color: #aaa; margin-bottom: 20px; }
+              .footer { margin-top: 30px; font-size: 0.8rem; color: #777; border-top: 1px solid #222; padding-top: 15px; }
               .blink { animation: b 1.5s infinite; display: inline-block; margin-right: 8px; }
               @keyframes b { 50% { opacity: 0; } }
           </style>
@@ -105,13 +117,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           <div class="eye-bg"><div class="pupil"></div></div>
           <div class="panel">
               <div class="title">RICARDO TRADER<br>FOREX E BITCOIN</div>
-              <div class="status-box">
-                <span class="blink">●</span> STATUS: ${DOC_CONTROL.status}
-              </div>
+              <div class="status-box"><span class="blink">●</span> STATUS: ${DOC_CONTROL.status}</div>
+              <div class="market-info">MERCADO FOREX: ${forexAberto ? 'ABERTO ✅' : 'FECHADO 🔒'}<br>BITCOIN: 24/7 ✅</div>
               <div class="footer">
                   ISO 9001 - DOCUMENTO CONTROLADO<br>
-                  VERSÃO: ${DOC_CONTROL.versao} | REF: ${DOC_CONTROL.revisao}<br>
-                  REVISADO EM ${DOC_CONTROL.data_revisao} às ${DOC_CONTROL.hora_revisao}
+                  VERSÃO: ${DOC_CONTROL.versao} | REVISADO EM ${DOC_CONTROL.data_revisao}
               </div>
           </div>
       </body>
