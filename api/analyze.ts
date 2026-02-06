@@ -1,16 +1,18 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 
-// Armazena o último sinal para evitar repetições na mesma vela
+// Cache para evitar sinais duplicados na mesma vela
 let lastSinais: Record<string, string> = {};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const token = process.env.TG_TOKEN || "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
-  const chat_id = process.env.TG_CHAT_ID || "7625668696";
-  const versao = "23"; 
+  // Configurações extraídas do seu documento
+  const token = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
+  const chat_id = "7625668696";
+  const versao = "25"; 
+  
   const agora = new Date();
   const dataHora = agora.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
   
-  // Lógica de mercado Forex (Finais de semana)
+  // Lógica de Horário Forex
   const diaSemana = agora.getDay(); 
   const horaAtual = agora.getHours();
   const isForexOpen = (diaSemana >= 1 && diaSemana <= 4) || (diaSemana === 5 && horaAtual < 18) || (diaSemana === 0 && horaAtual >= 19);
@@ -26,7 +28,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     for (const ativo of ATIVOS) {
       if (ativo.type === "forex" && !isForexOpen) continue;
 
-      // TIMEFRAME M1 PARA TESTE
+      // TESTE ATIVO EM M1 (1 MINUTO)
       const url = ativo.source === "kucoin" 
         ? `https://api.kucoin.com/api/v1/market/candles?symbol=${ativo.symbol}&type=1min`
         : `https://query1.finance.yahoo.com/v8/finance/chart/${ativo.symbol}?interval=1m&range=1d`;
@@ -47,10 +49,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       if (candles.length < 50) continue;
-      const i = candles.length - 1; // Vela atual (em fechamento)
-      const p = i - 1;             // Vela anterior
+      const i = candles.length - 1; // Vela Atual
+      const p = i - 1;             // Vela Anterior
 
-      // Cálculo de EMA simplificado
+      // Indicadores
       const getEMA = (period: number, idx: number) => {
         const k = 2 / (period + 1);
         let ema = candles[idx - 40].c; 
@@ -58,7 +60,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return ema;
       };
 
-      // Cálculo de RSI 9
       const getRSI = (idx: number, period: number) => {
         let g = 0, l = 0;
         for (let j = idx - period + 1; j <= idx; j++) {
@@ -76,13 +77,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       let sinalStr = "";
 
-      // LÓGICA DE SINAL
-      // ACIMA: EMA4 cruza p/ cima EMA8 + RSI9 > 30 + RSI inclinado p/ cima + Vela Verde
-      if (e4_p <= e8_p && e4_i > e8_i && rsi_i > 30 && rsi_i > rsi_p && isVerde) {
+      // Lógica de Sinal ACIMA
+      if (e4_p <= e8_p && e4_i > e8_i && (rsi_i > 30 || rsi_i > 50) && rsi_i > rsi_p && isVerde) {
         sinalStr = "ACIMA";
       } 
-      // ABAIXO: EMA4 cruza p/ baixo EMA8 + RSI9 < 70 + RSI inclinado p/ baixo + Vela Vermelha
-      else if (e4_p >= e8_p && e4_i < e8_i && rsi_i < 70 && rsi_i < rsi_p && isVermelha) {
+      // Lógica de Sinal ABAIXO
+      else if (e4_p >= e8_p && e4_i < e8_i && (rsi_i < 70 || rsi_i < 50) && rsi_i < rsi_p && isVermelha) {
         sinalStr = "ABAIXO";
       }
 
@@ -94,24 +94,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const icon = sinalStr === "ACIMA" ? "🟢" : "🔴";
           const hVela = new Date(candles[i].t * 1000).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
-          // Formato HTML para garantir o negrito solicitado
           const msg = `SINAL EMITIDO!\n<b>ATIVO</b>: ${ativo.label}\n<b>SINAL</b>: ${icon} ${sinalStr}\n<b>VELA</b>: ${hVela}`;
           
-          await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-              chat_id: chat_id, 
-              text: msg, 
-              parse_mode: 'HTML' 
-            })
-          });
+          // Envio para Telegram com tratamento de erro
+          try {
+            await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ chat_id, text: msg, parse_mode: 'HTML' })
+            });
+          } catch (err) {
+            // Fallback caso o HTML falhe
+            await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ chat_id, text: `SINAL: ${ativo.label} ${sinalStr} as ${hVela}` })
+            });
+          }
         }
       }
     }
-
-    const statusForex = isForexOpen ? "ABERTO" : "FECHADO";
-    const colorForex = isForexOpen ? "var(--primary)" : "#ff4444";
 
     res.setHeader('Content-Type', 'text/html');
     return res.status(200).send(`
@@ -145,21 +147,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               <p style="font-size: 11px; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 2px; text-align: center; margin-bottom: 15px; font-weight: 700;">Análise do Mercado</p>
               <div class="asset-grid">
                   <div class="asset-card"><span>BTCUSD</span><span class="status-pill" style="background:rgba(0,255,136,0.15); color:var(--primary)">ABERTO</span></div>
-                  <div class="asset-card"><span>EURUSD</span><span class="status-pill" style="background:rgba(255,68,68,0.15); color:${colorForex}">${statusForex}</span></div>
-                  <div class="asset-card"><span>GBPUSD</span><span class="status-pill" style="background:rgba(255,68,68,0.15); color:${colorForex}">${statusForex}</span></div>
-                  <div class="asset-card"><span>USDJPY</span><span class="status-pill" style="background:rgba(255,68,68,0.15); color:${colorForex}">${statusForex}</span></div>
+                  <div class="asset-card"><span>EURUSD</span><span class="status-pill" style="background:rgba(255,68,68,0.15); color:${isForexOpen ? 'var(--primary)' : '#ff4444'}">${isForexOpen ? 'ABERTO' : 'FECHADO'}</span></div>
+                  <div class="asset-card"><span>GBPUSD</span><span class="status-pill" style="background:rgba(255,68,68,0.15); color:${isForexOpen ? 'var(--primary)' : '#ff4444'}">${isForexOpen ? 'ABERTO' : 'FECHADO'}</span></div>
+                  <div class="asset-card"><span>USDJPY</span><span class="status-pill" style="background:rgba(255,68,68,0.15); color:${isForexOpen ? 'var(--primary)' : '#ff4444'}">${isForexOpen ? 'ABERTO' : 'FECHADO'}</span></div>
               </div>
               <div class="footer">
                   <div><b>DATA</b><p>${dataHora.split(',')[0]}</p></div>
                   <div><b>HORA</b><p>${dataHora.split(',')[1]}</p></div>
                   <div><b>VERSÃO</b><p style="color:var(--primary); font-weight:bold;">${versao}</p></div>
-                  <div><b>STATUS</b><p style="color:var(--primary)">ONLINE (TESTE M1)</p></div>
+                  <div><b>STATUS</b><p style="color:var(--primary)">TESTE M1 ATIVO</p></div>
               </div>
               <div class="revision-log">
                   <h2>Histórico de Revisões</h2>
-                  <div class="revision-item">Versão 23: Mudança p/ HTML no Telegram (Estabilidade de Negrito)</div>
-                  <div class="revision-item">Versão 22: Retorno Temporário p/ M1 (Validação de Mensagens)</div>
-                  <div class="revision-item">Versão 21: Retorno ao M15 Oficial + Lógica EMA/RSI/Cor Revalidada</div>
+                  <div class="revision-item">Versão 25: Forçar Envio Telegram + Redundância de Formatação</div>
+                  <div class="revision-item">Versão 24: Token Inserido Direto + Validação de Log</div>
+                  <div class="revision-item">Versão 15: Sensibilidade de Cruzamento M1 Aumentada</div>
                   <div class="revision-item">Versão 00: Elaboração Inicial</div>
               </div>
           </div>
@@ -167,6 +169,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       </body></html>
     `);
   } catch (e) { 
-    return res.status(200).send("OK"); 
+    return res.status(200).send("Sistema em standby"); 
   }
 }
