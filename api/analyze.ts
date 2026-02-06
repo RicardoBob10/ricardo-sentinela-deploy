@@ -3,10 +3,10 @@ import { VercelRequest, VercelResponse } from '@vercel/node';
 let lastSinais: Record<string, string> = {};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // Configurações de Ambiente
+  // Configurações vindas das Environment Variables da Vercel
   const token = process.env.TG_TOKEN || "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = process.env.TG_CHAT_ID || "7625668696";
-  const versao = "12"; 
+  const versao = "13"; 
   const dataHora = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 
   const ATIVOS = [
@@ -18,10 +18,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     for (const ativo of ATIVOS) {
-      // APLICAÇÃO DO TIMEFRAME: 15 MINUTOS
+      // ALTERADO PARA M1 PARA TESTE DE SINAIS (CONFORME SOLICITADO)
       const url = ativo.source === "kucoin" 
-        ? `https://api.kucoin.com/api/v1/market/candles?symbol=${ativo.symbol}&type=15min`
-        : `https://query1.finance.yahoo.com/v8/finance/chart/${ativo.symbol}?interval=15m&range=5d`;
+        ? `https://api.kucoin.com/api/v1/market/candles?symbol=${ativo.symbol}&type=1min`
+        : `https://query1.finance.yahoo.com/v8/finance/chart/${ativo.symbol}?interval=1m&range=1d`;
 
       const response = await fetch(url);
       const json = await response.json();
@@ -42,7 +42,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const i = c.length - 1; 
       const p = i - 1;
 
-      // Cálculos Técnicos
+      // Cálculo EMA 4 e 8
       const getEMA = (period: number, idx: number) => {
         const k = 2 / (period + 1);
         let ema = c[idx - 40].c; 
@@ -50,6 +50,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return ema;
       };
 
+      // Cálculo RSI 9
       const getRSI = (idx: number, period: number) => {
         let g = 0, l = 0;
         for (let j = idx - period + 1; j <= idx; j++) {
@@ -70,11 +71,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       let sinalStr = "";
 
-      // LÓGICA SINAL ACIMA (EMA 4 cruza 8 + RSI 9 > 50 + RSI subindo + Vela Verde)
+      // LÓGICA SINAL ACIMA (EMA 4 cruza p/ cima EMA 8 + RSI 9 > 50 + RSI inclinado p/ cima + Vela Verde)
       if (e4_prev <= e8_prev && e4_atual > e8_atual && rsi9 > 50 && rsi9 > rsi9_prev && isVerde) {
         sinalStr = "ACIMA";
       }
-      // LÓGICA SINAL ABAIXO (EMA 4 cruza 8 + RSI 9 < 50 + RSI descendo + Vela Vermelha)
+      // LÓGICA SINAL ABAIXO (EMA 4 cruza p/ baixo EMA 8 + RSI 9 < 50 + RSI inclinado p/ baixo + Vela Vermelha)
       if (e4_prev >= e8_prev && e4_atual < e8_atual && rsi9 < 50 && rsi9 < rsi9_prev && isVermelha) {
         sinalStr = "ABAIXO";
       }
@@ -136,10 +137,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   <div><b>DATA</b><p>${dataHora.split(',')[0]}</p></div>
                   <div><b>HORA</b><p>${dataHora.split(',')[1]}</p></div>
                   <div><b>VERSÃO</b><p style="color:var(--primary); font-weight:bold;">${versao}</p></div>
-                  <div><b>STATUS</b><p style="color:var(--primary)">ONLINE</p></div>
+                  <div><b>STATUS</b><p style="color:var(--primary)">TESTE M1</p></div>
               </div>
               <div class="revision-log">
                   <h2>Histórico de Revisões</h2>
+                  <div class="revision-item">Versão 13: Timeframe M1 para Teste + Revisão de Lógica de Cruzamento</div>
                   <div class="revision-item">Versão 12: Timeframe M15 + Histórico Alinhado à Esquerda (Fonte Branca)</div>
                   <div class="revision-item">Versão 11: Lógica Final EMA 4/8 + RSI 9 + Cor da Vela</div>
                   <div class="revision-item">Versão 10: Migração para Timeframe M15</div>
