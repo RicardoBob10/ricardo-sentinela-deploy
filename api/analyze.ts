@@ -3,10 +3,10 @@ import { VercelRequest, VercelResponse } from '@vercel/node';
 let lastSinais: Record<string, string> = {};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // Variáveis vindas do Environment Variables da Vercel
+  // Configurações de Ambiente
   const token = process.env.TG_TOKEN || "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = process.env.TG_CHAT_ID || "7625668696";
-  const versao = "11"; 
+  const versao = "12"; 
   const dataHora = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 
   const ATIVOS = [
@@ -18,7 +18,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     for (const ativo of ATIVOS) {
-      // TIMEFRAME 15 MINUTOS
+      // APLICAÇÃO DO TIMEFRAME: 15 MINUTOS
       const url = ativo.source === "kucoin" 
         ? `https://api.kucoin.com/api/v1/market/candles?symbol=${ativo.symbol}&type=15min`
         : `https://query1.finance.yahoo.com/v8/finance/chart/${ativo.symbol}?interval=15m&range=5d`;
@@ -42,7 +42,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const i = c.length - 1; 
       const p = i - 1;
 
-      // Cálculo EMA
+      // Cálculos Técnicos
       const getEMA = (period: number, idx: number) => {
         const k = 2 / (period + 1);
         let ema = c[idx - 40].c; 
@@ -50,7 +50,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return ema;
       };
 
-      // Cálculo RSI 9
       const getRSI = (idx: number, period: number) => {
         let g = 0, l = 0;
         for (let j = idx - period + 1; j <= idx; j++) {
@@ -71,11 +70,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       let sinalStr = "";
 
-      // LÓGICA SINAL ACIMA
+      // LÓGICA SINAL ACIMA (EMA 4 cruza 8 + RSI 9 > 50 + RSI subindo + Vela Verde)
       if (e4_prev <= e8_prev && e4_atual > e8_atual && rsi9 > 50 && rsi9 > rsi9_prev && isVerde) {
         sinalStr = "ACIMA";
       }
-      // LÓGICA SINAL ABAIXO
+      // LÓGICA SINAL ABAIXO (EMA 4 cruza 8 + RSI 9 < 50 + RSI descendo + Vela Vermelha)
       if (e4_prev >= e8_prev && e4_atual < e8_atual && rsi9 < 50 && rsi9 < rsi9_prev && isVermelha) {
         sinalStr = "ABAIXO";
       }
@@ -84,7 +83,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const sid = `${ativo.label}_${sinalStr}_${c[i].t}`;
         if (lastSinais[ativo.label] !== sid) {
           lastSinais[ativo.label] = sid;
-          
           const icon = sinalStr === "ACIMA" ? "🟢" : "🔴";
           const horaVela = new Date(c[i].t * 1000).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
@@ -118,13 +116,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               .footer { margin-top: 35px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.08); display: grid; grid-template-columns: 1fr 1fr; gap: 15px; font-size: 11px; }
               .footer b { color: #888; display: block; font-size: 9px; text-transform: uppercase; margin-bottom: 2px; }
               .footer p { margin: 0; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
-              .history { font-size: 8px; color: rgba(255,255,255,0.2); margin-top: 20px; text-align: center; font-family: sans-serif; line-height: 1.2; }
+              .revision-log { margin-top: 25px; padding-top: 15px; border-top: 1px dotted rgba(255,255,255,0.1); text-align: left; }
+              .revision-log h2 { font-size: 10px; color: #888; text-transform: uppercase; margin-bottom: 8px; }
+              .revision-item { font-size: 9px; color: #ffffff; margin-bottom: 3px; font-family: sans-serif; opacity: 0.8; }
           </style>
       </head>
       <body>
           <div class="main-card">
               <h1>RICARDO SENTINELA BOT</h1>
               <div class="status-badge"><div class="pulse-dot"></div> ATIVOS EM MONITORAMENTO REAL</div>
+              <p style="font-size: 11px; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 2px; text-align: center; margin-bottom: 15px; font-weight: 700;">Análise do Mercado</p>
               <div class="asset-grid">
                   <div class="asset-card"><span>BTCUSD</span><span class="status-pill">ABERTO</span></div>
                   <div class="asset-card"><span>EURUSD</span><span class="status-pill">ABERTO</span></div>
@@ -135,16 +136,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   <div><b>DATA</b><p>${dataHora.split(',')[0]}</p></div>
                   <div><b>HORA</b><p>${dataHora.split(',')[1]}</p></div>
                   <div><b>VERSÃO</b><p style="color:var(--primary); font-weight:bold;">${versao}</p></div>
-                  <div><b>TIMEFRAME</b><p style="color:#fff">M15</p></div>
+                  <div><b>STATUS</b><p style="color:var(--primary)">ONLINE</p></div>
               </div>
-              <div class="history">
-                Versão 09: Refinamento de Inclinação RSI e Layout<br>
-                Versão 10: Migração para Timeframe M15<br>
-                Versão 11: Lógica Final EMA 4/8 + RSI 9 + Cor da Vela Verde/Vermelha
+              <div class="revision-log">
+                  <h2>Histórico de Revisões</h2>
+                  <div class="revision-item">Versão 12: Timeframe M15 + Histórico Alinhado à Esquerda (Fonte Branca)</div>
+                  <div class="revision-item">Versão 11: Lógica Final EMA 4/8 + RSI 9 + Cor da Vela</div>
+                  <div class="revision-item">Versão 10: Migração para Timeframe M15</div>
+                  <div class="revision-item">Versão 09: Refinamento de Inclinação RSI e Layout</div>
+                  <div class="revision-item">Versão 08: Ajuste Timeframe M1 para Teste</div>
+                  <div class="revision-item">Versão 07: Lógica EMA 4/8 + RSI 9 + Cor Vela</div>
+                  <div class="revision-item">Versão 06: Remoção de Fractais e Implementação EMA 9/21</div>
+                  <div class="revision-item">Versão 02: Ajuste de Layout e Variáveis Vercel</div>
+                  <div class="revision-item">Versão 01: Alteração do RSI de 14 para 9</div>
+                  <div class="revision-item">Versão 00: Elaboração Inicial</div>
               </div>
           </div>
           <script>setTimeout(()=>location.reload(), 60000);</script>
       </body></html>
     `);
-  } catch (e) { return res.status(200).send("PROCESSANDO..."); }
+  } catch (e) { return res.status(200).send("OK"); }
 }
