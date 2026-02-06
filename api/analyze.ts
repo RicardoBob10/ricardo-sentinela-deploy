@@ -5,7 +5,7 @@ let lastSinais: Record<string, string> = {};
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const token = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = "7625668696";
-  const versao = "00";
+  const versao = "00-M1";
   const dataHora = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 
   const ATIVOS = [
@@ -18,8 +18,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     for (const ativo of ATIVOS) {
       const url = ativo.source === "kucoin" 
-        ? `https://api.kucoin.com/api/v1/market/candles?symbol=${ativo.symbol}&type=15min`
-        : `https://query1.finance.yahoo.com/v8/finance/chart/${ativo.symbol}?interval=15m&range=2d`;
+        ? `https://api.kucoin.com/api/v1/market/candles?symbol=${ativo.symbol}&type=1min`
+        : `https://query1.finance.yahoo.com/v8/finance/chart/${ativo.symbol}?interval=1m&range=1d`;
 
       const response = await fetch(url);
       const json = await response.json();
@@ -39,7 +39,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (candles.length < 40) continue;
       const i = candles.length - 1;
 
-      // --- LÓGICA INDICADOR RICARDO TRADER (RT_PRO) ---
       const getEMA = (p: number, idx: number) => {
         const k = 2 / (p + 1);
         let ema = candles[0].c;
@@ -95,38 +94,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               :root { --primary: #00ff88; --bg: #050505; }
               body { background-color: var(--bg); background-image: radial-gradient(circle at 2px 2px, rgba(255,255,255,0.02) 1px, transparent 0); background-size: 32px 32px; color: #fff; font-family: 'Inter', sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
               .main-card { width: 90%; max-width: 380px; background: rgba(17,17,17,0.85); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.1); border-radius: 32px; padding: 35px 25px; box-shadow: 0 25px 50px rgba(0,0,0,0.8); }
-              
-              h1 { 
-                  font-size: 26px; 
-                  text-align: center; 
-                  margin: 0 0 25px 0; 
-                  font-weight: 900; 
-                  text-transform: uppercase; 
-                  color: #FFFFFF; 
-                  /* Realce Branco Puro e Vibrante */
-                  text-shadow: 0 0 10px rgba(255,255,255,0.8), 0 0 20px rgba(255,255,255,0.4);
-                  letter-spacing: 1px;
-              }
-
+              h1 { font-size: 26px; text-align: center; margin: 0 0 25px 0; font-weight: 900; text-transform: uppercase; color: #FFFFFF; text-shadow: 0 0 10px rgba(255,255,255,0.8), 0 0 20px rgba(255,255,255,0.4); letter-spacing: 1px; }
               .status-badge { display: flex; align-items: center; justify-content: center; gap: 10px; background: rgba(0,255,136,0.08); border: 1px solid rgba(0,255,136,0.2); padding: 10px; border-radius: 14px; font-size: 12px; font-weight: 700; color: var(--primary); margin-bottom: 30px; }
               .pulse-dot { height: 8px; width: 8px; background-color: var(--primary); border-radius: 50%; box-shadow: 0 0 15px var(--primary); animation: pulse 1.5s infinite; }
-              @keyframes pulse { 0%, 100% { transform: scale(0.95); opacity: 1; } 50% { transform: scale(1.1); opacity: 0.5; } }
-              
               .asset-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); padding: 14px 18px; border-radius: 16px; display: flex; justify-content: space-between; margin-bottom: 10px; }
               .status-pill { font-size: 10px; font-weight: 800; padding: 4px 10px; border-radius: 6px; background: rgba(0,255,136,0.15); color: var(--primary); }
-              
               .footer { margin-top: 35px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.08); display: grid; grid-template-columns: 1fr 1fr; gap: 15px; font-size: 11px; }
               .footer b { color: #888; display: block; font-size: 9px; text-transform: uppercase; margin-bottom: 2px; }
               .footer p { margin: 0; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+              @keyframes pulse { 0%, 100% { transform: scale(0.95); opacity: 1; } 50% { transform: scale(1.1); opacity: 0.5; } }
           </style>
       </head>
       <body>
           <div class="main-card">
               <h1>RICARDO SENTINELA BOT</h1>
               <div class="status-badge"><div class="pulse-dot"></div> ATIVOS EM MONITORAMENTO REAL</div>
-              
-              <p style="font-size: 11px; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 2px; text-align: center; margin-bottom: 15px; font-weight: 700;">Análise do Mercado</p>
-              
               <div class="asset-grid">
                   <div class="asset-card"><span>BTCUSD</span><span class="status-pill">ABERTO</span></div>
                   <div class="asset-card"><span>EURUSD</span><span class="status-pill">ABERTO</span></div>
@@ -140,7 +122,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   <div><b>STATUS</b><p style="color:var(--primary)">ONLINE</p></div>
               </div>
           </div>
-          <script>setTimeout(()=>location.reload(), 60000);</script>
+          <script>setTimeout(()=>location.reload(), 30000);</script>
       </body></html>
     `);
   } catch (e) { return res.status(200).send("SERVER ONLINE"); }
