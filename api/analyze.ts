@@ -3,9 +3,10 @@ import { VercelRequest, VercelResponse } from '@vercel/node';
 let lastSinais: Record<string, string> = {};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // Variáveis vindas do Environment Variables da Vercel
   const token = process.env.TG_TOKEN || "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = process.env.TG_CHAT_ID || "7625668696";
-  const versao = "08"; 
+  const versao = "11"; 
   const dataHora = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 
   const ATIVOS = [
@@ -17,10 +18,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     for (const ativo of ATIVOS) {
-      // CONFIGURADO PARA M1 (TESTE DE SINAIS RÁPIDOS)
+      // TIMEFRAME 15 MINUTOS
       const url = ativo.source === "kucoin" 
-        ? `https://api.kucoin.com/api/v1/market/candles?symbol=${ativo.symbol}&type=1min`
-        : `https://query1.finance.yahoo.com/v8/finance/chart/${ativo.symbol}?interval=1m&range=1d`;
+        ? `https://api.kucoin.com/api/v1/market/candles?symbol=${ativo.symbol}&type=15min`
+        : `https://query1.finance.yahoo.com/v8/finance/chart/${ativo.symbol}?interval=15m&range=5d`;
 
       const response = await fetch(url);
       const json = await response.json();
@@ -38,10 +39,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       if (c.length < 50) continue;
-      
       const i = c.length - 1; 
       const p = i - 1;
 
+      // Cálculo EMA
       const getEMA = (period: number, idx: number) => {
         const k = 2 / (period + 1);
         let ema = c[idx - 40].c; 
@@ -49,6 +50,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return ema;
       };
 
+      // Cálculo RSI 9
       const getRSI = (idx: number, period: number) => {
         let g = 0, l = 0;
         for (let j = idx - period + 1; j <= idx; j++) {
@@ -58,7 +60,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return 100 - (100 / (1 + (g / (l || 1))));
       };
 
-      // LÓGICA: EMA 4, EMA 8, RSI 9 e Cor da Vela
       const e4_atual = getEMA(4, i);
       const e8_atual = getEMA(8, i);
       const e4_prev = getEMA(4, p);
@@ -70,12 +71,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       let sinalStr = "";
 
-      // SINAL ACIMA: EMA4 cruza p/ cima EMA8 + RSI9 > 30 (ou 50) + RSI subindo + Vela Verde
-      if (e4_prev <= e8_prev && e4_atual > e8_atual && rsi9 > 30 && rsi9 > rsi9_prev && isVerde) {
+      // LÓGICA SINAL ACIMA
+      if (e4_prev <= e8_prev && e4_atual > e8_atual && rsi9 > 50 && rsi9 > rsi9_prev && isVerde) {
         sinalStr = "ACIMA";
       }
-      // SINAL ABAIXO: EMA4 cruza p/ baixo EMA8 + RSI9 < 70 (ou 50) + RSI descendo + Vela Vermelha
-      if (e4_prev >= e8_prev && e4_atual < e8_atual && rsi9 < 70 && rsi9 < rsi9_prev && isVermelha) {
+      // LÓGICA SINAL ABAIXO
+      if (e4_prev >= e8_prev && e4_atual < e8_atual && rsi9 < 50 && rsi9 < rsi9_prev && isVermelha) {
         sinalStr = "ABAIXO";
       }
 
@@ -102,39 +103,47 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       <!DOCTYPE html>
       <html lang="pt-BR">
       <head>
-          <meta charset="UTF-8">
+          <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
           <title>RICARDO SENTINELA PRO</title>
           <style>
               :root { --primary: #00ff88; --bg: #050505; }
-              body { background-color: var(--bg); color: #fff; font-family: 'Inter', sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
-              .main-card { width: 90%; max-width: 380px; background: rgba(17,17,17,0.85); border: 1px solid rgba(255,255,255,0.1); border-radius: 32px; padding: 35px 25px; box-shadow: 0 25px 50px rgba(0,0,0,0.8); }
-              h1 { font-size: 26px; text-align: center; margin-bottom: 25px; font-weight: 900; text-transform: uppercase; text-shadow: 0 0 10px rgba(255,255,255,0.8); }
-              .status-badge { display: flex; align-items: center; justify-content: center; gap: 10px; background: rgba(0,255,136,0.08); padding: 10px; border-radius: 14px; font-size: 12px; color: var(--primary); }
-              .asset-card { background: rgba(255,255,255,0.03); padding: 14px; border-radius: 16px; display: flex; justify-content: space-between; margin-top: 10px; }
+              body { background-color: var(--bg); background-image: radial-gradient(circle at 2px 2px, rgba(255,255,255,0.02) 1px, transparent 0); background-size: 32px 32px; color: #fff; font-family: 'Inter', sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+              .main-card { width: 90%; max-width: 380px; background: rgba(17,17,17,0.85); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.1); border-radius: 32px; padding: 35px 25px; box-shadow: 0 25px 50px rgba(0,0,0,0.8); }
+              h1 { font-size: 26px; text-align: center; margin: 0 0 25px 0; font-weight: 900; text-transform: uppercase; color: #FFFFFF; text-shadow: 0 0 10px rgba(255,255,255,0.8), 0 0 20px rgba(255,255,255,0.4); letter-spacing: 1px; }
+              .status-badge { display: flex; align-items: center; justify-content: center; gap: 10px; background: rgba(0,255,136,0.08); border: 1px solid rgba(0,255,136,0.2); padding: 10px; border-radius: 14px; font-size: 12px; font-weight: 700; color: var(--primary); margin-bottom: 30px; }
+              .pulse-dot { height: 8px; width: 8px; background-color: var(--primary); border-radius: 50%; box-shadow: 0 0 15px var(--primary); animation: pulse 1.5s infinite; }
+              @keyframes pulse { 0%, 100% { transform: scale(0.95); opacity: 1; } 50% { transform: scale(1.1); opacity: 0.5; } }
+              .asset-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); padding: 14px 18px; border-radius: 16px; display: flex; justify-content: space-between; margin-bottom: 10px; }
+              .status-pill { font-size: 10px; font-weight: 800; padding: 4px 10px; border-radius: 6px; background: rgba(0,255,136,0.15); color: var(--primary); }
               .footer { margin-top: 35px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.08); display: grid; grid-template-columns: 1fr 1fr; gap: 15px; font-size: 11px; }
-              .history { font-size: 8px; color: rgba(255,255,255,0.2); margin-top: 20px; text-align: center; }
+              .footer b { color: #888; display: block; font-size: 9px; text-transform: uppercase; margin-bottom: 2px; }
+              .footer p { margin: 0; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+              .history { font-size: 8px; color: rgba(255,255,255,0.2); margin-top: 20px; text-align: center; font-family: sans-serif; line-height: 1.2; }
           </style>
       </head>
       <body>
           <div class="main-card">
               <h1>RICARDO SENTINELA BOT</h1>
-              <div class="status-badge">MODO TESTE M1 ATIVO</div>
+              <div class="status-badge"><div class="pulse-dot"></div> ATIVOS EM MONITORAMENTO REAL</div>
               <div class="asset-grid">
-                  <div class="asset-card"><span>BTCUSD</span><span style="color:var(--primary)">M1</span></div>
-                  <div class="asset-card"><span>EURUSD</span><span style="color:var(--primary)">M1</span></div>
-                  <div class="asset-card"><span>GBPUSD</span><span style="color:var(--primary)">M1</span></div>
-                  <div class="asset-card"><span>USDJPY</span><span style="color:var(--primary)">M1</span></div>
+                  <div class="asset-card"><span>BTCUSD</span><span class="status-pill">ABERTO</span></div>
+                  <div class="asset-card"><span>EURUSD</span><span class="status-pill">ABERTO</span></div>
+                  <div class="asset-card"><span>GBPUSD</span><span class="status-pill">ABERTO</span></div>
+                  <div class="asset-card"><span>USDJPY</span><span class="status-pill">ABERTO</span></div>
               </div>
               <div class="footer">
                   <div><b>DATA</b><p>${dataHora.split(',')[0]}</p></div>
+                  <div><b>HORA</b><p>${dataHora.split(',')[1]}</p></div>
                   <div><b>VERSÃO</b><p style="color:var(--primary); font-weight:bold;">${versao}</p></div>
+                  <div><b>TIMEFRAME</b><p style="color:#fff">M15</p></div>
               </div>
               <div class="history">
-                Versão 07: Lógica EMA 4/8 + RSI 9 + Cor Vela<br>
-                Versão 08: Ajuste Timeframe M1 para Teste e Layout Final
+                Versão 09: Refinamento de Inclinação RSI e Layout<br>
+                Versão 10: Migração para Timeframe M15<br>
+                Versão 11: Lógica Final EMA 4/8 + RSI 9 + Cor da Vela Verde/Vermelha
               </div>
           </div>
-          <script>setTimeout(()=>location.reload(), 30000);</script>
+          <script>setTimeout(()=>location.reload(), 60000);</script>
       </body></html>
     `);
   } catch (e) { return res.status(200).send("PROCESSANDO..."); }
