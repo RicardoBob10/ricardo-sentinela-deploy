@@ -5,7 +5,7 @@ let lastSinais: Record<string, string> = {};
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const token = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = "7625668696";
-  const versao = "00-M1-RT-ACCURACY-100";
+  const versao = "00-M1-RT-PRECISION";
   const dataHora = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 
   const ATIVOS = [
@@ -37,9 +37,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       if (c.length < 50) continue;
+      
+      // i é a vela ATUAL. O sinal (seta) no seu script ocorre na vela i-2 (duas atrás)
       const i = c.length - 1; 
+      const s = i - 2; // Índice do Sinal
 
-      // --- CÁLCULOS IGUAIS AO SCRIPT RT_PRO ---
+      // --- FUNÇÕES DE CÁLCULO ---
       const getEMA = (p: number, idx: number) => {
         const k = 2 / (p + 1);
         let ema = c[idx - 40].c; 
@@ -56,40 +59,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return 100 - (100 / (1 + (g / (l || 1))));
       };
 
-      // 1. MACD
-      const v_macd = getEMA(12, i) - getEMA(26, i);
-      const v_signal = getEMA(9, i);
+      // --- CÁLCULOS NA VELA DO SINAL (s) ---
+      const macd_s = getEMA(12, s) - getEMA(26, s);
+      const signal_s = getEMA(9, s);
+      const rsi_s = getRSI(s, 9);
+      const rsi_prev = getRSI(s - 1, 9);
+      const mom_s = c[s].c - c[s - 10].c;
+      const mom_prev = c[s - 1].c - c[s - 11].c;
 
-      // 2. RSI (9)
-      const v_rsi = getRSI(i, 9);
-      const v_rsi_prev = getRSI(i-1, 9);
+      // DiNapoli Stochastic Simples na vela do sinal
+      const low14 = Math.min(...c.slice(s - 13, s + 1).map(v => v.l));
+      const high14 = Math.max(...c.slice(s - 13, s + 1).map(v => v.h));
+      const fast_k = ((c[s].c - low14) / (high14 - low14)) * 100;
 
-      // 3. DINAPOLI STOCHASTIC (14, 3, 3)
-      const low14 = Math.min(...c.slice(i-13, i+1).map(v => v.l));
-      const high14 = Math.max(...c.slice(i-13, i+1).map(v => v.h));
-      const fast_k = ((c[i].c - low14) / (high14 - low14)) * 100;
-      // Simulando r_stoch e s_stoch do script
-      const stoch_confirm_alta = fast_k > 50;
-      const stoch_confirm_baixa = fast_k < 50;
+      // FRACTAL (A vela S comparada com S-2, S-1, S+1, S+2)
+      const f_topo = c[s].h > c[s-2].h && c[s].h > c[s-1].h && c[s].h > c[s+1].h && c[s].h > c[s+2].h;
+      const f_fundo = c[s].l < c[s-2].l && c[s].l < c[s-1].l && c[s].l < c[s+1].l && c[s].l < c[s+2].l;
 
-      // 4. MOMENTUM (10)
-      const v_mom = c[i].c - c[i-10].c;
-      const v_mom_prev = c[i-1].c - c[i-11].c;
-
-      // 5. FRACTAIS (A vela de sinal é a [2])
-      const f_topo = c[i-2].h > c[i-4].h && c[i-2].h > c[i-3].h && c[i-2].h > c[i-1].h && c[i-2].h > c[i].h;
-      const f_fundo = c[i-2].l < c[i-4].l && c[i-2].l < c[i-3].l && c[i-2].l < c[i-1].l && c[i-2].l < c[i].l;
-
-      // --- VALIDAÇÃO DE SINAL (IDENTIDADE 100%) ---
       let sinalStr = "";
-      if (f_fundo && v_macd > v_signal && v_rsi > v_rsi_prev && stoch_confirm_alta && v_mom > v_mom_prev) sinalStr = "ACIMA";
-      if (f_topo && v_macd < v_signal && v_rsi < v_rsi_prev && stoch_confirm_baixa && v_mom < v_mom_prev) sinalStr = "ABAIXO";
+      if (f_fundo && macd_s > signal_s && rsi_s > rsi_prev && fast_k > 50 && mom_s > mom_prev) sinalStr = "ACIMA";
+      if (f_topo && macd_s < signal_s && rsi_s < rsi_prev && fast_k < 50 && mom_s < mom_prev) sinalStr = "ABAIXO";
 
       if (sinalStr) {
-        const sid = `${ativo.label}_${sinalStr}_${c[i].t}`;
+        const sid = `${ativo.label}_${sinalStr}_${c[s].t}`;
         if (lastSinais[ativo.label] !== sid) {
           lastSinais[ativo.label] = sid;
-          const msg = `**SINAL CONFIRMADO (RT_PRO)**\n\n**ATIVO**: ${ativo.label}\n**SINAL**: ${sinalStr === "ACIMA" ? "🟢" : "🔴"} ${sinalStr}\n**VELA**: ${new Date(c[i].t * 1000).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })}`;
+          const msg = `**SINAL CONFIRMADO (RT_PRO)**\n\n**ATIVO**: ${ativo.label}\n**SINAL**: ${sinalStr === "ACIMA" ? "🟢" : "🔴"} ${sinalStr}\n**VELA**: ${new Date(c[s].t * 1000).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })}`;
           await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ chat_id, text: msg, parse_mode: 'Markdown' })
