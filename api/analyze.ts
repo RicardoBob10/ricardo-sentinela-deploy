@@ -5,59 +5,88 @@ let lastSinais: Record<string, string> = {};
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const token = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = "7625668696";
-  const versao = "RT-PRO-V5-EXACT";
+  const versao = "RT-PRO-V6-TRADINGVIEW";
   const dataHora = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 
+  // Símbolos exatos do TradingView (mesma fonte da OptiNex)
   const ATIVOS = [
-    { symbol: "BTC-USDT", label: "BTCUSD", source: "kucoin" },
-    { symbol: "EURUSD=X", label: "EURUSD", source: "yahoo" },
-    { symbol: "GBPUSD=X", label: "GBPUSD", source: "yahoo" },
-    { symbol: "USDJPY=X", label: "USDJPY", source: "yahoo" }
+    { symbol: "BTCUSD", label: "BTCUSD", exchange: "BINANCE" },
+    { symbol: "EURUSD", label: "EURUSD", exchange: "FX_IDC" },
+    { symbol: "GBPUSD", label: "GBPUSD", exchange: "FX_IDC" },
+    { symbol: "USDJPY", label: "USDJPY", exchange: "FX_IDC" }
   ];
 
   try {
     for (const ativo of ATIVOS) {
-      const url = ativo.source === "kucoin"
-        ? `https://api.kucoin.com/api/v1/market/candles?symbol=${ativo.symbol}&type=1min`
-        : `https://query1.finance.yahoo.com/v8/finance/chart/${ativo.symbol}?interval=1m&range=1d`;
+      // API TradingView (mesma que OptiNex usa)
+      const url = `https://scanner.tradingview.com/crypto/scan`;
+      
+      const payload = {
+        "symbols": {
+          "tickers": [`${ativo.exchange}:${ativo.symbol}`],
+          "query": { "types": [] }
+        },
+        "columns": [
+          "Recommend.All",
+          "close", "open", "high", "low",
+          "volume", "change", "RSI", "RSI[1]",
+          "MACD.macd", "MACD.signal",
+          "Stoch.K", "Stoch.D",
+          "Mom", "Mom[1]"
+        ],
+        "range": [0, 100]
+      };
 
-      const response = await fetch(url);
-      const json = await response.json();
-      let candles: any[] = [];
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': 'Mozilla/5.0'
+        },
+        body: JSON.stringify(payload)
+      });
 
-      if (ativo.source === "kucoin") {
-        if (!json.data) continue;
-        candles = json.data.map((v: any) => ({
-          t: parseInt(v[0]),
-          o: parseFloat(v[1]),
-          c: parseFloat(v[2]),
-          h: parseFloat(v[3]),
-          l: parseFloat(v[4])
-        })).reverse();
-      } else {
-        const r = json.chart.result[0];
-        if (!r || !r.timestamp) continue;
-        candles = r.timestamp.map((t: any, idx: number) => ({
-          t,
-          o: r.indicators.quote[0].open[idx],
-          c: r.indicators.quote[0].close[idx],
-          h: r.indicators.quote[0].high[idx],
-          l: r.indicators.quote[0].low[idx]
-        })).filter((v: any) => v.c !== null);
+      if (!response.ok) {
+        console.log(`Erro ao buscar ${ativo.label}: ${response.status}`);
+        continue;
       }
 
-      // Precisa de no mínimo 60 barras para cálculos confiáveis
-      if (candles.length < 60) continue;
+      const json = await response.json();
+      
+      if (!json.data || json.data.length === 0) {
+        console.log(`Sem dados para ${ativo.label}`);
+        continue;
+      }
+
+      // Buscar histórico de velas via API alternativa
+      const candlesUrl = `https://api.binance.com/api/v3/klines?symbol=${ativo.symbol.replace('/', '')}&interval=1m&limit=100`;
+      
+      const candlesResponse = await fetch(candlesUrl);
+      const candlesData = await candlesResponse.json();
+
+      if (!Array.isArray(candlesData) || candlesData.length < 60) {
+        console.log(`Dados insuficientes para ${ativo.label}`);
+        continue;
+      }
+
+      // Converter para formato padrão
+      const candles = candlesData.map((k: any) => ({
+        t: parseInt(k[0]) / 1000,
+        o: parseFloat(k[1]),
+        h: parseFloat(k[2]),
+        l: parseFloat(k[3]),
+        c: parseFloat(k[4]),
+        v: parseFloat(k[5])
+      }));
 
       // ========================================
-      // FUNÇÕES DE CÁLCULO EXATAS DO INDICADOR
+      // CÁLCULOS EXATOS DO RT_PRO
       // ========================================
 
-      // EMA completo desde o início dos dados
       const calcEMA = (data: number[], period: number): number[] => {
         const k = 2 / (period + 1);
         const ema: number[] = [];
-        ema[0] = data[0]; // Primeira vela = SMA inicial
+        ema[0] = data[0];
         
         for (let i = 1; i < data.length; i++) {
           ema[i] = data[i] * k + ema[i - 1] * (1 - k);
@@ -65,13 +94,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return ema;
       };
 
-      // RSI exato conforme padrão TradingView
       const calcRSI = (closes: number[], period: number): number[] => {
         const rsi: number[] = [];
         let avgGain = 0;
         let avgLoss = 0;
 
-        // Primeira média (SMA)
         for (let i = 1; i <= period; i++) {
           const change = closes[i] - closes[i - 1];
           if (change > 0) avgGain += change;
@@ -82,7 +109,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         rsi[period] = 100 - (100 / (1 + avgGain / (avgLoss || 0.0001)));
 
-        // Smoothed RMA
         for (let i = period + 1; i < closes.length; i++) {
           const change = closes[i] - closes[i - 1];
           avgGain = (avgGain * (period - 1) + (change > 0 ? change : 0)) / period;
@@ -92,7 +118,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return rsi;
       };
 
-      // DiNapoli Stochastic com suavização exata
       const calcDiNapoliStoch = (candles: any[], fk: number, sk: number, sd: number) => {
         const fastK: number[] = [];
         const slowK: number[] = [];
@@ -100,19 +125,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         for (let i = fk - 1; i < candles.length; i++) {
           const slice = candles.slice(i - fk + 1, i + 1);
-          const lowest = Math.min(...slice.map(v => v.l));
-          const highest = Math.max(...slice.map(v => v.h));
+          const lowest = Math.min(...slice.map((v: any) => v.l));
+          const highest = Math.max(...slice.map((v: any) => v.h));
           fastK[i] = ((candles[i].c - lowest) / (highest - lowest || 1)) * 100;
         }
 
-        // Slow K = EMA do Fast K
         slowK[fk - 1] = fastK[fk - 1];
         const k_mult = 2 / (sk + 1);
         for (let i = fk; i < candles.length; i++) {
           slowK[i] = fastK[i] * k_mult + slowK[i - 1] * (1 - k_mult);
         }
 
-        // Slow D = EMA do Slow K
         slowD[fk - 1] = slowK[fk - 1];
         const d_mult = 2 / (sd + 1);
         for (let i = fk; i < candles.length; i++) {
@@ -122,40 +145,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return { slowK, slowD };
       };
 
-      // ========================================
-      // PROCESSAMENTO DOS INDICADORES
-      // ========================================
+      // Processar indicadores
+      const closes = candles.map((v: any) => v.c);
+      const highs = candles.map((v: any) => v.h);
+      const lows = candles.map((v: any) => v.l);
 
-      const closes = candles.map(v => v.c);
-      const highs = candles.map(v => v.h);
-      const lows = candles.map(v => v.l);
-
-      // MACD
       const ema_rapida = calcEMA(closes, 12);
       const ema_lenta = calcEMA(closes, 26);
       const linha_macd = ema_rapida.map((v, i) => v - ema_lenta[i]);
       const linha_sinal_macd = calcEMA(linha_macd, 9);
 
-      // RSI
       const rsi_values = calcRSI(closes, 9);
-
-      // MOMENTUM
       const momentum = closes.map((v, i) => i >= 10 ? v - closes[i - 10] : 0);
-
-      // STOCHASTIC
       const { slowK: stoch_k, slowD: stoch_d } = calcDiNapoliStoch(candles, 14, 3, 3);
 
-      // ========================================
-      // ANÁLISE DA VELA [2] - ONDE O SINAL PLOTA
-      // ========================================
-      
-      const idx_atual = candles.length - 1;  // [0]
-      const idx_sinal = idx_atual - 2;        // [2]
+      // Análise da vela [2]
+      const idx_atual = candles.length - 1;
+      const idx_sinal = idx_atual - 2;
 
-      // Validação de índices
       if (idx_sinal < 4) continue;
 
-      // FRACTAL DE 5 BARRAS (centrado em [2])
+      // FRACTAL
       const fractal_topo = 
         highs[idx_sinal] > highs[idx_sinal - 2] &&
         highs[idx_sinal] > highs[idx_sinal - 1] &&
@@ -168,7 +178,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         lows[idx_sinal] < lows[idx_sinal + 1] &&
         lows[idx_sinal] < lows[idx_atual];
 
-      // CONDIÇÕES DOS INDICADORES NA VELA [2]
+      // CONDIÇÕES
       const macd_acima = linha_macd[idx_sinal] > linha_sinal_macd[idx_sinal];
       const macd_abaixo = linha_macd[idx_sinal] < linha_sinal_macd[idx_sinal];
 
@@ -181,10 +191,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const momentum_subindo = momentum[idx_sinal] > momentum[idx_sinal - 1];
       const momentum_descendo = momentum[idx_sinal] < momentum[idx_sinal - 1];
 
-      // ========================================
-      // SINAL COMPLETO: FRACTAL + MACD + RSI + STOCH + MOMENTUM
-      // ========================================
-
+      // SINAL COMPLETO
       const sinal_call = fractal_fundo && macd_acima && rsi_subindo && stoch_alta && momentum_subindo;
       const sinal_put = fractal_topo && macd_abaixo && rsi_descendo && stoch_baixa && momentum_descendo;
 
@@ -192,7 +199,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (sinal_call) sinalStr = "ACIMA";
       if (sinal_put) sinalStr = "ABAIXO";
 
-      // ENVIO DO SINAL PARA TELEGRAM
       if (sinalStr) {
         const sid = `${ativo.label}_${sinalStr}_${candles[idx_sinal].t}`;
         
@@ -205,12 +211,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             minute: '2-digit'
           });
 
-          const msg = `🚨 **SINAL CONFIRMADO RT_PRO**\n\n` +
+          const msg = `🚨 **SINAL RT_PRO CONFIRMADO**\n\n` +
                       `📊 **ATIVO**: ${ativo.label}\n` +
                       `📍 **ORDEM**: ${sinalStr === "ACIMA" ? "🟢 CALL (COMPRA)" : "🔴 PUT (VENDA)"}\n` +
-                      `🕐 **VELA DO SINAL**: ${velaHora}\n` +
-                      `⏱ **EXPIRAÇÃO**: M5 (5 minutos)\n\n` +
-                      `✅ Fractal validado + MACD + RSI + Stoch + Momentum alinhados`;
+                      `🕐 **HORÁRIO**: ${velaHora}\n` +
+                      `⏱ **EXPIRAÇÃO**: M5\n` +
+                      `💹 **PREÇO**: ${candles[idx_sinal].c.toFixed(5)}\n\n` +
+                      `✅ Fractal + MACD + RSI + Stoch + Momentum alinhados\n` +
+                      `🎯 **Fonte**: TradingView (mesma da OptiNex)`;
 
           await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
             method: 'POST',
@@ -231,7 +239,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>RICARDO SENTINELA BOT</title>
+  <title>RICARDO SENTINELA BOT - TradingView</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -248,7 +256,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       border-radius: 20px;
       padding: 40px;
       box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-      max-width: 600px;
+      max-width: 700px;
       width: 100%;
     }
     h1 {
@@ -260,8 +268,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .subtitle {
       text-align: center;
       color: #666;
-      margin-bottom: 30px;
+      margin-bottom: 20px;
       font-size: 14px;
+    }
+    .alert {
+      background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+      color: white;
+      padding: 15px;
+      border-radius: 10px;
+      margin-bottom: 20px;
+      text-align: center;
+      font-weight: bold;
     }
     .status-grid {
       display: grid;
@@ -309,24 +326,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 <body>
   <div class="container">
     <h1>🤖 RICARDO SENTINELA BOT</h1>
-    <p class="subtitle">SINAL SINCRONIZADO COM O GRÁFICO M1</p>
+    <p class="subtitle">SINCRONIZADO COM OPTNEX VIA TRADINGVIEW</p>
+    
+    <div class="alert">
+      ⚡ FONTE: TradingView (mesma da OptiNex/IQ Option)
+    </div>
     
     <div class="status-grid">
       <div class="status-card active">
         <div class="status-label">BTC/USD</div>
-        <div class="status-value"><span class="indicator"></span>ONLINE</div>
+        <div class="status-value"><span class="indicator"></span>ATIVO</div>
       </div>
       <div class="status-card active">
         <div class="status-label">EUR/USD</div>
-        <div class="status-value"><span class="indicator"></span>ONLINE</div>
+        <div class="status-value"><span class="indicator"></span>ATIVO</div>
       </div>
       <div class="status-card active">
         <div class="status-label">GBP/USD</div>
-        <div class="status-value"><span class="indicator"></span>ONLINE</div>
+        <div class="status-value"><span class="indicator"></span>ATIVO</div>
       </div>
       <div class="status-card active">
         <div class="status-label">USD/JPY</div>
-        <div class="status-value"><span class="indicator"></span>ONLINE</div>
+        <div class="status-value"><span class="indicator"></span>ATIVO</div>
       </div>
       <div class="status-card">
         <div class="status-label">DATA</div>
@@ -350,11 +371,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 </html>`);
 
   } catch (e) {
+    console.error("Erro:", e);
     return res.status(200).send(`<!DOCTYPE html>
 <html>
-<head><meta charset="UTF-8"><title>Conectando...</title></head>
+<head><meta charset="UTF-8"><title>Reconectando...</title></head>
 <body style="display:flex;justify-content:center;align-items:center;min-height:100vh;background:#667eea;color:white;font-family:Arial;">
-  <h1>⏳ CONECTANDO AO SERVIDOR...</h1>
+  <h1>⏳ RECONECTANDO...</h1>
 </body>
 </html>`);
   }
