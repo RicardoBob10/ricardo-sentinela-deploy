@@ -1,15 +1,16 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 
+// Armazena o último sinal para evitar repetições na mesma vela
 let lastSinais: Record<string, string> = {};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const token = process.env.TG_TOKEN || "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = process.env.TG_CHAT_ID || "7625668696";
-  const versao = "22"; 
+  const versao = "23"; 
   const agora = new Date();
   const dataHora = agora.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
   
-  // Lógica de mercado Forex
+  // Lógica de mercado Forex (Finais de semana)
   const diaSemana = agora.getDay(); 
   const horaAtual = agora.getHours();
   const isForexOpen = (diaSemana >= 1 && diaSemana <= 4) || (diaSemana === 5 && horaAtual < 18) || (diaSemana === 0 && horaAtual >= 19);
@@ -25,41 +26,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     for (const ativo of ATIVOS) {
       if (ativo.type === "forex" && !isForexOpen) continue;
 
-      // ALTERADO PARA 1 MINUTO PARA TESTE
+      // TIMEFRAME M1 PARA TESTE
       const url = ativo.source === "kucoin" 
         ? `https://api.kucoin.com/api/v1/market/candles?symbol=${ativo.symbol}&type=1min`
         : `https://query1.finance.yahoo.com/v8/finance/chart/${ativo.symbol}?interval=1m&range=1d`;
 
       const response = await fetch(url);
       const json = await response.json();
-      let c: any[] = [];
+      let candles: any[] = [];
 
       if (ativo.source === "kucoin") {
         if (!json.data) continue;
-        c = json.data.map((v: any) => ({ t: parseInt(v[0]), o: parseFloat(v[1]), c: parseFloat(v[2]) })).reverse();
+        candles = json.data.map((v: any) => ({ t: parseInt(v[0]), o: parseFloat(v[1]), c: parseFloat(v[2]) })).reverse();
       } else {
         const r = json.chart.result?.[0];
         if (!r || !r.timestamp) continue;
-        c = r.timestamp.map((t: any, idx: number) => ({
+        candles = r.timestamp.map((t: any, idx: number) => ({
           t, o: r.indicators.quote[0].open[idx], c: r.indicators.quote[0].close[idx]
         })).filter((v: any) => v.c !== null && v.o !== null);
       }
 
-      if (c.length < 50) continue;
-      const i = c.length - 1; 
-      const p = i - 1;
+      if (candles.length < 50) continue;
+      const i = candles.length - 1; // Vela atual (em fechamento)
+      const p = i - 1;             // Vela anterior
 
+      // Cálculo de EMA simplificado
       const getEMA = (period: number, idx: number) => {
         const k = 2 / (period + 1);
-        let ema = c[idx - 40].c; 
-        for (let j = idx - 39; j <= idx; j++) ema = c[j].c * k + ema * (1 - k);
+        let ema = candles[idx - 40].c; 
+        for (let j = idx - 39; j <= idx; j++) ema = candles[j].c * k + ema * (1 - k);
         return ema;
       };
 
+      // Cálculo de RSI 9
       const getRSI = (idx: number, period: number) => {
         let g = 0, l = 0;
         for (let j = idx - period + 1; j <= idx; j++) {
-          const d = c[j].c - c[j-1].c;
+          const d = candles[j].c - candles[j-1].c;
           if (d >= 0) g += d; else l -= d;
         }
         return 100 - (100 / (1 + (g / (l || 1))));
@@ -68,31 +71,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const e4_i = getEMA(4, i); const e8_i = getEMA(8, i);
       const e4_p = getEMA(4, p); const e8_p = getEMA(8, p);
       const rsi_i = getRSI(i, 9); const rsi_p = getRSI(p, 9);
-      const isVerde = c[i].c > c[i].o;
-      const isVermelha = c[i].c < c[i].o;
+      const isVerde = candles[i].c > candles[i].o;
+      const isVermelha = candles[i].c < candles[i].o;
 
       let sinalStr = "";
 
-      // LÓGICA DE SINAL (EMA 4/8 + RSI 9 + COR)
-      if (e4_p <= e8_p && e4_i > e8_i && (rsi_i > 30 || rsi_i > 50) && rsi_i > rsi_p && isVerde) {
+      // LÓGICA DE SINAL
+      // ACIMA: EMA4 cruza p/ cima EMA8 + RSI9 > 30 + RSI inclinado p/ cima + Vela Verde
+      if (e4_p <= e8_p && e4_i > e8_i && rsi_i > 30 && rsi_i > rsi_p && isVerde) {
         sinalStr = "ACIMA";
-      } else if (e4_p >= e8_p && e4_i < e8_i && (rsi_i < 70 || rsi_i < 50) && rsi_i < rsi_p && isVermelha) {
+      } 
+      // ABAIXO: EMA4 cruza p/ baixo EMA8 + RSI9 < 70 + RSI inclinado p/ baixo + Vela Vermelha
+      else if (e4_p >= e8_p && e4_i < e8_i && rsi_i < 70 && rsi_i < rsi_p && isVermelha) {
         sinalStr = "ABAIXO";
       }
 
       if (sinalStr) {
-        const sid = `${ativo.label}_${sinalStr}_${c[i].t}`;
-        if (lastSinais[ativo.label] !== sid) {
-          lastSinais[ativo.label] = sid;
+        const signalKey = `${ativo.label}_${sinalStr}_${candles[i].t}`;
+        
+        if (lastSinais[ativo.label] !== signalKey) {
+          lastSinais[ativo.label] = signalKey;
           const icon = sinalStr === "ACIMA" ? "🟢" : "🔴";
-          const hVela = new Date(c[i].t * 1000).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+          const hVela = new Date(candles[i].t * 1000).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
-          const msg = `SINAL EMITIDO!\n**ATIVO**: ${ativo.label}\n**SINAL**: ${icon} ${sinalStr}\n**VELA**: ${hVela}`;
+          // Formato HTML para garantir o negrito solicitado
+          const msg = `SINAL EMITIDO!\n<b>ATIVO</b>: ${ativo.label}\n<b>SINAL</b>: ${icon} ${sinalStr}\n<b>VELA</b>: ${hVela}`;
           
           await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chat_id, text: msg, parse_mode: 'Markdown' })
+            body: JSON.stringify({ 
+              chat_id: chat_id, 
+              text: msg, 
+              parse_mode: 'HTML' 
+            })
           });
         }
       }
@@ -145,15 +157,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               </div>
               <div class="revision-log">
                   <h2>Histórico de Revisões</h2>
+                  <div class="revision-item">Versão 23: Mudança p/ HTML no Telegram (Estabilidade de Negrito)</div>
                   <div class="revision-item">Versão 22: Retorno Temporário p/ M1 (Validação de Mensagens)</div>
                   <div class="revision-item">Versão 21: Retorno ao M15 Oficial + Lógica EMA/RSI/Cor Revalidada</div>
-                  <div class="revision-item">Versão 15: Sensibilidade de Cruzamento M1 Aumentada p/ Teste</div>
-                  <div class="revision-item">Versão 11: Lógica Final EMA 4/8 + RSI 9 + Cor da Vela</div>
                   <div class="revision-item">Versão 00: Elaboração Inicial</div>
               </div>
           </div>
           <script>setTimeout(()=>location.reload(), 30000);</script>
       </body></html>
     `);
-  } catch (e) { return res.status(200).send("OK"); }
+  } catch (e) { 
+    return res.status(200).send("OK"); 
+  }
 }
