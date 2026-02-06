@@ -5,79 +5,84 @@ let lastSinais: Record<string, string> = {};
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const token = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = "7625668696";
-  const versao = "RT-PRO-V6-TRADINGVIEW";
+  const versao = "RT-PRO-V7-MULTI-SOURCE";
   const dataHora = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 
-  // Símbolos exatos do TradingView (mesma fonte da OptiNex)
   const ATIVOS = [
-    { symbol: "BTCUSD", label: "BTCUSD", exchange: "BINANCE" },
-    { symbol: "EURUSD", label: "EURUSD", exchange: "FX_IDC" },
-    { symbol: "GBPUSD", label: "GBPUSD", exchange: "FX_IDC" },
-    { symbol: "USDJPY", label: "USDJPY", exchange: "FX_IDC" }
+    { 
+      symbol: "BTCUSDT", 
+      label: "BTCUSD", 
+      source: "binance",
+      url: "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=100"
+    },
+    { 
+      symbol: "EURUSD", 
+      label: "EURUSD", 
+      source: "fxpractice",
+      url: "https://api-fxpractice.oanda.com/v3/instruments/EUR_USD/candles?count=100&granularity=M1"
+    },
+    { 
+      symbol: "GBPUSD", 
+      label: "GBPUSD", 
+      source: "fxpractice",
+      url: "https://api-fxpractice.oanda.com/v3/instruments/GBP_USD/candles?count=100&granularity=M1"
+    },
+    { 
+      symbol: "USDJPY", 
+      label: "USDJPY", 
+      source: "fxpractice",
+      url: "https://api-fxpractice.oanda.com/v3/instruments/USD_JPY/candles?count=100&granularity=M1"
+    }
   ];
 
   try {
     for (const ativo of ATIVOS) {
-      // API TradingView (mesma que OptiNex usa)
-      const url = `https://scanner.tradingview.com/crypto/scan`;
-      
-      const payload = {
-        "symbols": {
-          "tickers": [`${ativo.exchange}:${ativo.symbol}`],
-          "query": { "types": [] }
-        },
-        "columns": [
-          "Recommend.All",
-          "close", "open", "high", "low",
-          "volume", "change", "RSI", "RSI[1]",
-          "MACD.macd", "MACD.signal",
-          "Stoch.K", "Stoch.D",
-          "Mom", "Mom[1]"
-        ],
-        "range": [0, 100]
-      };
+      let candles: any[] = [];
 
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': 'Mozilla/5.0'
-        },
-        body: JSON.stringify(payload)
-      });
+      try {
+        const response = await fetch(ativo.url, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0'
+          }
+        });
 
-      if (!response.ok) {
-        console.log(`Erro ao buscar ${ativo.label}: ${response.status}`);
+        if (!response.ok) {
+          console.log(`Erro ao buscar ${ativo.label}: ${response.status}`);
+          continue;
+        }
+
+        const json = await response.json();
+
+        if (ativo.source === "binance") {
+          if (!Array.isArray(json) || json.length < 60) continue;
+          
+          candles = json.map((k: any) => ({
+            t: parseInt(k[0]) / 1000,
+            o: parseFloat(k[1]),
+            h: parseFloat(k[2]),
+            l: parseFloat(k[3]),
+            c: parseFloat(k[4]),
+            v: parseFloat(k[5])
+          }));
+        } else if (ativo.source === "fxpractice") {
+          if (!json.candles || json.candles.length < 60) continue;
+          
+          candles = json.candles.map((k: any) => ({
+            t: new Date(k.time).getTime() / 1000,
+            o: parseFloat(k.mid.o),
+            h: parseFloat(k.mid.h),
+            l: parseFloat(k.mid.l),
+            c: parseFloat(k.mid.c),
+            v: parseFloat(k.volume || 0)
+          }));
+        }
+
+      } catch (err) {
+        console.log(`Erro ao processar ${ativo.label}:`, err);
         continue;
       }
 
-      const json = await response.json();
-      
-      if (!json.data || json.data.length === 0) {
-        console.log(`Sem dados para ${ativo.label}`);
-        continue;
-      }
-
-      // Buscar histórico de velas via API alternativa
-      const candlesUrl = `https://api.binance.com/api/v3/klines?symbol=${ativo.symbol.replace('/', '')}&interval=1m&limit=100`;
-      
-      const candlesResponse = await fetch(candlesUrl);
-      const candlesData = await candlesResponse.json();
-
-      if (!Array.isArray(candlesData) || candlesData.length < 60) {
-        console.log(`Dados insuficientes para ${ativo.label}`);
-        continue;
-      }
-
-      // Converter para formato padrão
-      const candles = candlesData.map((k: any) => ({
-        t: parseInt(k[0]) / 1000,
-        o: parseFloat(k[1]),
-        h: parseFloat(k[2]),
-        l: parseFloat(k[3]),
-        c: parseFloat(k[4]),
-        v: parseFloat(k[5])
-      }));
+      if (candles.length < 60) continue;
 
       // ========================================
       // CÁLCULOS EXATOS DO RT_PRO
@@ -200,7 +205,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (sinal_put) sinalStr = "ABAIXO";
 
       if (sinalStr) {
-        const sid = `${ativo.label}_${sinalStr}_${candles[idx_sinal].t}`;
+        const sid = `${ativo.label}_${sinalStr}_${Math.floor(candles[idx_sinal].t / 60)}`;
         
         if (lastSinais[ativo.label] !== sid) {
           lastSinais[ativo.label] = sid;
@@ -216,9 +221,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                       `📍 **ORDEM**: ${sinalStr === "ACIMA" ? "🟢 CALL (COMPRA)" : "🔴 PUT (VENDA)"}\n` +
                       `🕐 **HORÁRIO**: ${velaHora}\n` +
                       `⏱ **EXPIRAÇÃO**: M5\n` +
-                      `💹 **PREÇO**: ${candles[idx_sinal].c.toFixed(5)}\n\n` +
-                      `✅ Fractal + MACD + RSI + Stoch + Momentum alinhados\n` +
-                      `🎯 **Fonte**: TradingView (mesma da OptiNex)`;
+                      `💹 **PREÇO**: ${candles[idx_sinal].c.toFixed(ativo.label === 'BTCUSD' ? 2 : 5)}\n\n` +
+                      `✅ Fractal + MACD + RSI + Stoch + Momentum alinhados`;
 
           await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
             method: 'POST',
@@ -229,6 +233,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               parse_mode: 'Markdown'
             })
           });
+
+          console.log(`✅ Sinal enviado: ${ativo.label} - ${sinalStr} às ${velaHora}`);
         }
       }
     }
@@ -239,7 +245,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>RICARDO SENTINELA BOT - TradingView</title>
+  <meta http-equiv="refresh" content="60">
+  <title>RICARDO SENTINELA BOT</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -284,7 +291,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       display: grid;
       grid-template-columns: repeat(2, 1fr);
       gap: 15px;
-      margin-bottom: 20px;
     }
     .status-card {
       background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
@@ -320,16 +326,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       display: inline-block;
       margin-right: 8px;
       box-shadow: 0 0 10px #4ade80;
+      animation: blink 1s infinite;
+    }
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
     }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>🤖 RICARDO SENTINELA BOT</h1>
-    <p class="subtitle">SINCRONIZADO COM OPTNEX VIA TRADINGVIEW</p>
+    <p class="subtitle">MONITORAMENTO ATIVO M1</p>
     
     <div class="alert">
-      ⚡ FONTE: TradingView (mesma da OptiNex/IQ Option)
+      ⚡ AUTO-REFRESH A CADA 60 SEGUNDOS
     </div>
     
     <div class="status-grid">
@@ -363,7 +374,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       </div>
       <div class="status-card active">
         <div class="status-label">STATUS</div>
-        <div class="status-value"><span class="indicator"></span>CONECTADO</div>
+        <div class="status-value"><span class="indicator"></span>ONLINE</div>
       </div>
     </div>
   </div>
@@ -371,12 +382,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 </html>`);
 
   } catch (e) {
-    console.error("Erro:", e);
+    console.error("Erro crítico:", e);
     return res.status(200).send(`<!DOCTYPE html>
 <html>
-<head><meta charset="UTF-8"><title>Reconectando...</title></head>
+<head><meta charset="UTF-8"><meta http-equiv="refresh" content="10"><title>Reconectando...</title></head>
 <body style="display:flex;justify-content:center;align-items:center;min-height:100vh;background:#667eea;color:white;font-family:Arial;">
-  <h1>⏳ RECONECTANDO...</h1>
+  <div style="text-align:center;">
+    <h1>⏳ RECONECTANDO...</h1>
+    <p>Tentando novamente em 10 segundos...</p>
+  </div>
 </body>
 </html>`);
   }
