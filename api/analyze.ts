@@ -3,10 +3,10 @@ import { VercelRequest, VercelResponse } from '@vercel/node';
 let lastSinais: Record<string, string> = {};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // CONFIGURAÇÃO DIRETA PARA NÃO FALHAR
-  const token = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA"; [cite: 161]
-  const chat_id = "7625668696"; [cite: 161]
-  const versao = "00"; [cite: 211]
+  // CONFIGURAÇÃO DIRETA - FIXA E SEGURA
+  const token = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
+  const chat_id = "7625668696";
+  const versao = "00";
   const dataHora = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 
   const ATIVOS = [
@@ -14,12 +14,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     { symbol: "EURUSD=X", label: "EURUSD", source: "yahoo" },
     { symbol: "GBPUSD=X", label: "GBPUSD", source: "yahoo" },
     { symbol: "USDJPY=X", label: "USDJPY", source: "yahoo" }
-  ]; [cite: 212]
+  ];
 
   try {
     for (const ativo of ATIVOS) {
       const url = ativo.source === "kucoin" 
-        ? `https://api.kucoin.com/api/v1/market/candles?symbol=${ativo.symbol}&type=15min` [cite: 214]
+        ? `https://api.kucoin.com/api/v1/market/candles?symbol=${ativo.symbol}&type=15min`
         : `https://query1.finance.yahoo.com/v8/finance/chart/${ativo.symbol}?interval=15m&range=2d`;
 
       const response = await fetch(url);
@@ -28,19 +28,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (ativo.source === "kucoin") {
         if (!json.data) continue;
-        candles = json.data.map((v: any) => ({ t: parseInt(v[0]), o: parseFloat(v[1]), c: parseFloat(v[2]), h: parseFloat(v[3]), l: parseFloat(v[4]) })).reverse(); [cite: 216]
+        // Ajuste Kucoin para garantir ordem cronológica correta
+        candles = json.data.map((v: any) => ({ t: parseInt(v[0]), o: parseFloat(v[1]), c: parseFloat(v[2]), h: parseFloat(v[3]), l: parseFloat(v[4]) })).reverse();
       } else {
         const r = json.chart.result[0];
         if (!r || !r.timestamp) continue;
         candles = r.timestamp.map((t: any, idx: number) => ({
           t, o: r.indicators.quote[0].open[idx], c: r.indicators.quote[0].close[idx], h: r.indicators.quote[0].high[idx], l: r.indicators.quote[0].low[idx]
-        })).filter((v: any) => v.c !== null); [cite: 218]
+        })).filter((v: any) => v.c !== null);
       }
 
       if (candles.length < 40) continue;
       const i = candles.length - 1;
 
-      // --- LÓGICA INDICADOR RICARDO TRADER (RT_PRO) --- [cite: 129]
+      // --- LÓGICA INDICADOR RICARDO TRADER (RT_PRO) ---
       const getEMA = (p: number, idx: number) => {
         const k = 2 / (p + 1);
         let ema = candles[0].c;
@@ -57,29 +58,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return 100 - (100 / (1 + (g / (l || 1))));
       };
 
-      // Cálculos RT_PRO [cite: 131, 132]
+      // Cálculos RT_PRO: MACD (12,26,9) + RSI (9) + Momentum (10)
       const macd = getEMA(12, i) - getEMA(26, i);
       const signal = getEMA(9, i);
       const rsi_v = getRSI(i, 9);
       const momentum = candles[i].c - candles[i-10].c;
       
+      // Fractal de 5 barras (Reversão Confirmada)
       const f_topo = candles[i-2].h > candles[i-4].h && candles[i-2].h > candles[i-3].h && candles[i-2].h > candles[i-1].h && candles[i-2].h > candles[i].h;
       const f_fundo = candles[i-2].l < candles[i-4].l && candles[i-2].l < candles[i-3].l && candles[i-2].l < candles[i-1].l && candles[i-2].l < candles[i].l;
 
       let sinalStr = "";
-      if (f_fundo && macd > signal && rsi_v > getRSI(i-1, 9) && momentum > (candles[i-1].c - candles[i-11].c)) sinalStr = "ACIMA"; [cite: 133, 229]
-      if (f_topo && macd < signal && rsi_v < getRSI(i-1, 9) && momentum < (candles[i-1].c - candles[i-11].c)) sinalStr = "ABAIXO"; [cite: 133, 230]
+      if (f_fundo && macd > signal && rsi_v > getRSI(i-1, 9) && momentum > (candles[i-1].c - candles[i-11].c)) sinalStr = "ACIMA";
+      if (f_topo && macd < signal && rsi_v < getRSI(i-1, 9) && momentum < (candles[i-1].c - candles[i-11].c)) sinalStr = "ABAIXO";
 
       if (sinalStr) {
         const velaHora = new Date(candles[i].t * 1000).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
         const sid = `${ativo.label}_${sinalStr}_${candles[i].t}`;
         
+        // Evita duplicidade no mesmo candle
         if (lastSinais[ativo.label] !== sid) {
           lastSinais[ativo.label] = sid;
-          const bolinha = sinalStr === "ACIMA" ? "🟢" : "🔴"; [cite: 233]
-          const msg = `SINAL EMITIDO!\n\n**ATIVO**: ${ativo.label}\n**SINAL**: ${bolinha} ${sinalStr}\n**VELA**: ${velaHora}`; [cite: 161, 233]
+          const bolinha = sinalStr === "ACIMA" ? "🟢" : "🔴";
+          const msg = `SINAL EMITIDO!\n\n**ATIVO**: ${ativo.label}\n**SINAL**: ${bolinha} ${sinalStr}\n**VELA**: ${velaHora}`;
+          
           await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ chat_id, text: msg, parse_mode: 'Markdown' })
           });
         }
@@ -128,6 +133,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           </div>
           <script>setTimeout(()=>location.reload(), 60000);</script>
       </body></html>
-    `); [cite: 236, 237, 239, 240, 241, 246, 249, 253, 255]
+    `);
   } catch (e) { return res.status(200).send("SERVER ONLINE"); }
 }
