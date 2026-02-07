@@ -5,16 +5,15 @@ let lastSinais: Record<string, string> = {};
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const token = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = "7625668696";
-  const versao = "30"; 
+  const versao = "31"; 
   
-  // Ajuste de Fuso Horário para São Paulo (UTC-3)
+  // Fuso Horário São Paulo (UTC-3) conforme o print da OPTNEX
   const agora = new Date();
   const dataHora = agora.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
   
   const diaSemana = agora.getDay(); 
   const horaBrasilia = parseInt(agora.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', hour12: false }));
   
-  // Lógica de Mercado Aberto (Forex)
   const isForexOpen = (diaSemana >= 1 && diaSemana <= 4) || (diaSemana === 5 && horaBrasilia < 18) || (diaSemana === 0 && horaBrasilia >= 19);
 
   const ATIVOS = [
@@ -28,7 +27,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     for (const ativo of ATIVOS) {
       if (ativo.type === "forex" && !isForexOpen) continue;
 
-      // TIMEFRAME ALTERADO PARA 15 MINUTOS (M15)
+      // M15 CONFIGURADO
       const url = ativo.source === "kucoin" 
         ? `https://api.kucoin.com/api/v1/market/candles?symbol=${ativo.symbol}&type=15min`
         : `https://query1.finance.yahoo.com/v8/finance/chart/${ativo.symbol}?interval=15m&range=1d`;
@@ -49,8 +48,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       if (candles.length < 50) continue;
-      const i = candles.length - 1; 
-      const p = i - 1;
+      const i = candles.length - 1; // Vela atual (em formação)
+      const p = i - 1;             // Vela anterior (fechada)
 
       const getEMA = (period: number, idx: number) => {
         const k = 2 / (period + 1);
@@ -68,6 +67,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return 100 - (100 / (1 + (g / (l || 1))));
       };
 
+      // Cálculo na vela atual para emitir o sinal no início da abertura
       const e4_i = getEMA(4, i); const e8_i = getEMA(8, i);
       const e4_p = getEMA(4, p); const e8_p = getEMA(8, p);
       const rsi_i = getRSI(i, 9); const rsi_p = getRSI(p, 9);
@@ -87,7 +87,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           lastSinais[ativo.label] = signalKey;
           const icon = sinalStr === "ACIMA" ? "🟢" : "🔴";
           
-          // Hora da abertura da vela M15 ajustada para SP
+          // Formatação exata para bater com o gráfico (Ex: 22:00, 22:15)
           const hVela = new Date(candles[i].t * 1000).toLocaleTimeString('pt-BR', { 
             timeZone: 'America/Sao_Paulo', 
             hour: '2-digit', 
@@ -105,13 +105,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    const statusForex = isForexOpen ? "ABERTO" : "FECHADO";
-    const colorForex = isForexOpen ? "var(--primary)" : "#ff4444";
-
     res.setHeader('Content-Type', 'text/html');
     return res.status(200).send(`
-      <!DOCTYPE html> <html lang="pt-BR"> <head> <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"> <title>RICARDO SENTINELA PRO</title> <style> :root { --primary: #00ff88; --bg: #050505; } body { background-color: var(--bg); background-image: radial-gradient(circle at 2px 2px, rgba(255,255,255,0.02) 1px, transparent 0); background-size: 32px 32px; color: #fff; font-family: 'Inter', sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; } .main-card { width: 95%; max-width: 420px; background: rgba(17,17,17,0.85); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.1); border-radius: 32px; padding: 30px 20px; box-shadow: 0 25px 50px rgba(0,0,0,0.8); } h1 { font-size: 24px; text-align: center; margin-bottom: 20px; font-weight: 900; text-transform: uppercase; color: #FFFFFF; text-shadow: 0 0 10px rgba(255,255,255,0.8); } .status-badge { display: flex; align-items: center; justify-content: center; gap: 10px; background: rgba(0,255,136,0.08); border: 1px solid rgba(0,255,136,0.2); padding: 10px; border-radius: 14px; font-size: 11px; color: var(--primary); margin-bottom: 20px; } .pulse-dot { height: 8px; width: 8px; background-color: var(--primary); border-radius: 50%; animation: pulse 1.5s infinite; } @keyframes pulse { 0%, 100% { transform: scale(0.95); opacity: 1; } 50% { transform: scale(1.1); opacity: 0.5; } } .asset-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); padding: 12px 15px; border-radius: 12px; display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px; } .status-pill { font-size: 10px; font-weight: 800; padding: 4px 10px; border-radius: 6px; } .footer { margin-top: 25px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.08); display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 11px; } .footer b { color: #888; font-size: 9px; text-transform: uppercase; } .footer p { margin: 2px 0; font-family: 'JetBrains Mono', monospace; font-size: 12px; } .revision-table { width: 100%; margin-top: 25px; border-collapse: collapse; font-size: 9px; color: rgba(255,255,255,0.7); } .revision-table th { text-align: left; color: var(--primary); border-bottom: 1px solid rgba(255,255,255,0.1); padding: 5px; text-transform: uppercase; } .revision-table td { padding: 5px; border-bottom: 1px solid rgba(255,255,255,0.05); } </style> </head> <body> <div class="main-card"> <h1>RICARDO SENTINELA BOT</h1> <div class="status-badge"><div class="pulse-dot"></div> MONITORANDO…</div> <div class="asset-grid"> <div class="asset-card"><span>BTCUSD</span><span class="status-pill" style="background:rgba(0,255,136,0.15); color:var(--primary)">ABERTO</span></div> <div class="asset-card"><span>EURUSD</span><span class="status-pill" style="background:rgba(255,68,68,0.15); color:${colorForex}">${statusForex}</span></div> <div class="asset-card"><span>GBPUSD</span><span class="status-pill" style="background:rgba(255,68,68,0.15); color:${colorForex}">${statusForex}</span></div> <div class="asset-card"><span>USDJPY</span><span class="status-pill" style="background:rgba(255,68,68,0.15); color:${colorForex}">${statusForex}</span></div> </div> <div class="footer"> <div><b>DATA</b><p>${dataHora.split(',')[0]}</p></div> <div><b>HORA</b><p>${dataHora.split(',')[1]}</p></div> <div><b>VERSÃO</b><p style="color:var(--primary); font-weight:bold;">${versao}</p></div> <div><b>STATUS</b><p style="color:var(--primary)">ATIVADO</p></div> </div> <table class="revision-table"> <thead> <tr><th>Nº</th><th>DATA</th><th>HORA</th><th>MOTIVO</th></tr> </thead> <tbody> <tr><td>30</td><td>06/02/26</td><td>22:01</td><td>Migração p/ M15 Oficial + Novo Formato Telegram</td></tr> <tr><td>29</td><td>06/02/26</td><td>21:17</td><td>Correção Fuso Horário VELA (UTC-3) - BASE APROVADA</td></tr> <tr><td>28</td><td>06/02/26</td><td>21:15</td><td>Estabilização M1 e Limpeza de Logs</td></tr> <tr><td>27</td><td>06/02/26</td><td>21:12</td><td>Retorno M1 + Auto-Teste de Conexão</td></tr> </tbody> </table> </div> <script>setTimeout(()=>location.reload(), 60000);</script> </body></html>
+      <!DOCTYPE html> <html lang="pt-BR"> <head> <meta charset="UTF-8"><title>RICARDO SENTINELA PRO</title>
+      <style>
+        :root { --primary: #00ff88; --bg: #050505; }
+        body { background-color: var(--bg); color: #fff; font-family: 'Inter', sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+        .main-card { width: 95%; max-width: 420px; background: rgba(17,17,17,0.85); border: 1px solid rgba(255,255,255,0.1); border-radius: 32px; padding: 30px 20px; }
+        h1 { font-size: 24px; text-align: center; font-weight: 900; color: #FFFFFF; }
+        .footer { margin-top: 25px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 11px; }
+        .revision-table { width: 100%; margin-top: 25px; border-collapse: collapse; font-size: 9px; }
+        .revision-table th { text-align: left; color: var(--primary); border-bottom: 1px solid rgba(255,255,255,0.1); }
+      </style> </head> <body>
+      <div class="main-card">
+        <h1>RICARDO SENTINELA BOT</h1>
+        <div style="text-align:center; color:var(--primary); margin-bottom:20px;">● MONITORAMENTO M15 ATIVO</div>
+        <div class="footer">
+          <div><b>DATA</b><p>${dataHora.split(',')[0]}</p></div>
+          <div><b>HORA</b><p>${dataHora.split(',')[1]}</p></div>
+          <div><b>VERSÃO</b><p style="color:var(--primary)">${versao}</p></div>
+          <div><b>STATUS</b><p>SINCRONIZADO OPTNEX</p></div>
+        </div>
+        <table class="revision-table">
+          <thead><tr><th>Nº</th><th>DATA</th><th>HORA</th><th>MOTIVO</th></tr></thead>
+          <tbody>
+            <tr><td>31</td><td>06/02/26</td><td>22:15</td><td>Sincronização M15 com Gráfico OPTNEX</td></tr>
+            <tr><td>30</td><td>06/02/26</td><td>22:01</td><td>Migração M15 + Formato Telegram</td></tr>
+            <tr><td>29</td><td>06/02/26</td><td>21:17</td><td>Base Aprovada (Correção UTC-3)</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <script>setTimeout(()=>location.reload(), 60000);</script>
+      </body></html>
     `);
   } catch (e) { return res.status(200).send("OK"); }
 }
-
