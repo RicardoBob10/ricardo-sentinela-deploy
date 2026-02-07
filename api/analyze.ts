@@ -1,28 +1,21 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 
 let lastSinais: Record<string, string> = {};
-let lastTestTime = 0;
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const token = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = "7625668696";
-  const versao = "27"; 
+  const versao = "29"; 
+  
+  // Ajuste de Fuso Horário para São Paulo (UTC-3)
   const agora = new Date();
   const dataHora = agora.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
   
   const diaSemana = agora.getDay(); 
-  const horaAtual = agora.getHours();
-  const isForexOpen = (diaSemana >= 1 && diaSemana <= 4) || (diaSemana === 5 && horaAtual < 18) || (diaSemana === 0 && horaAtual >= 19);
-
-  // Teste de conexão forçado (1 vez a cada 5 minutos para não floodar)
-  if (Date.now() - lastTestTime > 300000) {
-    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id, text: `🔄 <b>SENTINELA STATUS:</b> ONLINE EM M1\n<b>VERSÃO:</b> ${versao}`, parse_mode: 'HTML' })
-    }).catch(() => {});
-    lastTestTime = Date.now();
-  }
+  const horaBrasilia = parseInt(agora.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', hour12: false }));
+  
+  // Lógica de Mercado Aberto (Forex)
+  const isForexOpen = (diaSemana >= 1 && diaSemana <= 4) || (diaSemana === 5 && horaBrasilia < 18) || (diaSemana === 0 && horaBrasilia >= 19);
 
   const ATIVOS = [
     { symbol: "BTC-USDT", label: "BTCUSD", source: "kucoin", type: "crypto" },
@@ -35,7 +28,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     for (const ativo of ATIVOS) {
       if (ativo.type === "forex" && !isForexOpen) continue;
 
-      // TIMEFRAME EM M1 PARA TESTE CONFORME SOLICITADO
+      // TESTE EM M1 ATIVADO
       const url = ativo.source === "kucoin" 
         ? `https://api.kucoin.com/api/v1/market/candles?symbol=${ativo.symbol}&type=1min`
         : `https://query1.finance.yahoo.com/v8/finance/chart/${ativo.symbol}?interval=1m&range=1d`;
@@ -93,7 +86,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (lastSinais[ativo.label] !== signalKey) {
           lastSinais[ativo.label] = signalKey;
           const icon = sinalStr === "ACIMA" ? "🟢" : "🔴";
-          const hVela = new Date(candles[i].t * 1000).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+          
+          // Correção da hora da VELA para SP/Brasil
+          const hVela = new Date(candles[i].t * 1000).toLocaleTimeString('pt-BR', { 
+            timeZone: 'America/Sao_Paulo', 
+            hour: '2-digit', 
+            minute: '2-digit' 
+          });
 
           const msg = `SINAL EMITIDO!\n<b>ATIVO</b>: ${ativo.label}\n<b>SINAL</b>: ${icon} ${sinalStr}\n<b>VELA</b>: ${hVela}`;
           
@@ -111,60 +110,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     res.setHeader('Content-Type', 'text/html');
     return res.status(200).send(`
-      <!DOCTYPE html>
-      <html lang="pt-BR">
-      <head>
-          <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>RICARDO SENTINELA PRO</title>
-          <style>
-              :root { --primary: #00ff88; --bg: #050505; }
-              body { background-color: var(--bg); background-image: radial-gradient(circle at 2px 2px, rgba(255,255,255,0.02) 1px, transparent 0); background-size: 32px 32px; color: #fff; font-family: 'Inter', sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
-              .main-card { width: 95%; max-width: 420px; background: rgba(17,17,17,0.85); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.1); border-radius: 32px; padding: 30px 20px; box-shadow: 0 25px 50px rgba(0,0,0,0.8); }
-              h1 { font-size: 24px; text-align: center; margin-bottom: 20px; font-weight: 900; text-transform: uppercase; color: #FFFFFF; text-shadow: 0 0 10px rgba(255,255,255,0.8); }
-              .status-badge { display: flex; align-items: center; justify-content: center; gap: 10px; background: rgba(0,255,136,0.08); border: 1px solid rgba(0,255,136,0.2); padding: 10px; border-radius: 14px; font-size: 11px; color: var(--primary); margin-bottom: 20px; }
-              .pulse-dot { height: 8px; width: 8px; background-color: var(--primary); border-radius: 50%; animation: pulse 1.5s infinite; }
-              @keyframes pulse { 0%, 100% { transform: scale(0.95); opacity: 1; } 50% { transform: scale(1.1); opacity: 0.5; } }
-              .asset-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); padding: 12px 15px; border-radius: 12px; display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px; }
-              .status-pill { font-size: 10px; font-weight: 800; padding: 4px 10px; border-radius: 6px; }
-              .footer { margin-top: 25px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.08); display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 11px; }
-              .footer b { color: #888; font-size: 9px; text-transform: uppercase; }
-              .footer p { margin: 2px 0; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
-              .revision-table { width: 100%; margin-top: 25px; border-collapse: collapse; font-size: 9px; color: rgba(255,255,255,0.7); }
-              .revision-table th { text-align: left; color: var(--primary); border-bottom: 1px solid rgba(255,255,255,0.1); padding: 5px; text-transform: uppercase; }
-              .revision-table td { padding: 5px; border-bottom: 1px solid rgba(255,255,255,0.05); }
-          </style>
-      </head>
-      <body>
-          <div class="main-card">
-              <h1>RICARDO SENTINELA BOT</h1>
-              <div class="status-badge"><div class="pulse-dot"></div> MONITORAMENTO EM TEMPO REAL (TESTE M1)</div>
-              <div class="asset-grid">
-                  <div class="asset-card"><span>BTCUSD</span><span class="status-pill" style="background:rgba(0,255,136,0.15); color:var(--primary)">ABERTO</span></div>
-                  <div class="asset-card"><span>EURUSD</span><span class="status-pill" style="background:rgba(255,68,68,0.15); color:${colorForex}">${statusForex}</span></div>
-                  <div class="asset-card"><span>GBPUSD</span><span class="status-pill" style="background:rgba(255,68,68,0.15); color:${colorForex}">${statusForex}</span></div>
-                  <div class="asset-card"><span>USDJPY</span><span class="status-pill" style="background:rgba(255,68,68,0.15); color:${colorForex}">${statusForex}</span></div>
-              </div>
-              <div class="footer">
-                  <div><b>DATA</b><p>${dataHora.split(',')[0]}</p></div>
-                  <div><b>HORA</b><p>${dataHora.split(',')[1]}</p></div>
-                  <div><b>VERSÃO</b><p style="color:var(--primary); font-weight:bold;">${versao}</p></div>
-                  <div><b>STATUS</b><p style="color:var(--primary)">TESTE M1 ATIVO</p></div>
-              </div>
-              <table class="revision-table">
-                  <thead>
-                      <tr><th>Nº</th><th>DATA</th><th>HORA</th><th>MOTIVO</th></tr>
-                  </thead>
-                  <tbody>
-                      <tr><td>27</td><td>06/02/26</td><td>21:12</td><td>Retorno M1 + Auto-Teste de Conexão</td></tr>
-                      <tr><td>26</td><td>06/02/26</td><td>21:07</td><td>Aplicação M15 + Tabela de Revisão</td></tr>
-                      <tr><td>25</td><td>06/02/26</td><td>20:58</td><td>Forçar Envio Telegram + Redundância</td></tr>
-                      <tr><td>24</td><td>06/02/26</td><td>20:55</td><td>Token Inserido Direto + Validação</td></tr>
-                      <tr><td>15</td><td>06/02/26</td><td>20:46</td><td>Sensibilidade M1 Aumentada p/ Teste</td></tr>
-                  </tbody>
-              </table>
-          </div>
-          <script>setTimeout(()=>location.reload(), 30000);</script>
-      </body></html>
+      <!DOCTYPE html> <html lang="pt-BR"> <head> <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"> <title>RICARDO SENTINELA PRO</title> <style> :root { --primary: #00ff88; --bg: #050505; } body { background-color: var(--bg); background-image: radial-gradient(circle at 2px 2px, rgba(255,255,255,0.02) 1px, transparent 0); background-size: 32px 32px; color: #fff; font-family: 'Inter', sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; } .main-card { width: 95%; max-width: 420px; background: rgba(17,17,17,0.85); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.1); border-radius: 32px; padding: 30px 20px; box-shadow: 0 25px 50px rgba(0,0,0,0.8); } h1 { font-size: 24px; text-align: center; margin-bottom: 20px; font-weight: 900; text-transform: uppercase; color: #FFFFFF; text-shadow: 0 0 10px rgba(255,255,255,0.8); } .status-badge { display: flex; align-items: center; justify-content: center; gap: 10px; background: rgba(0,255,136,0.08); border: 1px solid rgba(0,255,136,0.2); padding: 10px; border-radius: 14px; font-size: 11px; color: var(--primary); margin-bottom: 20px; } .pulse-dot { height: 8px; width: 8px; background-color: var(--primary); border-radius: 50%; animation: pulse 1.5s infinite; } @keyframes pulse { 0%, 100% { transform: scale(0.95); opacity: 1; } 50% { transform: scale(1.1); opacity: 0.5; } } .asset-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); padding: 12px 15px; border-radius: 12px; display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px; } .status-pill { font-size: 10px; font-weight: 800; padding: 4px 10px; border-radius: 6px; } .footer { margin-top: 25px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.08); display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 11px; } .footer b { color: #888; font-size: 9px; text-transform: uppercase; } .footer p { margin: 2px 0; font-family: 'JetBrains Mono', monospace; font-size: 12px; } .revision-table { width: 100%; margin-top: 25px; border-collapse: collapse; font-size: 9px; color: rgba(255,255,255,0.7); } .revision-table th { text-align: left; color: var(--primary); border-bottom: 1px solid rgba(255,255,255,0.1); padding: 5px; text-transform: uppercase; } .revision-table td { padding: 5px; border-bottom: 1px solid rgba(255,255,255,0.05); } </style> </head> <body> <div class="main-card"> <h1>RICARDO SENTINELA BOT</h1> <div class="status-badge"><div class="pulse-dot"></div> MONITORAMENTO EM TEMPO REAL (SP/UTC-3)</div> <div class="asset-grid"> <div class="asset-card"><span>BTCUSD</span><span class="status-pill" style="background:rgba(0,255,136,0.15); color:var(--primary)">ABERTO</span></div> <div class="asset-card"><span>EURUSD</span><span class="status-pill" style="background:rgba(255,68,68,0.15); color:${colorForex}">${statusForex}</span></div> <div class="asset-card"><span>GBPUSD</span><span class="status-pill" style="background:rgba(255,68,68,0.15); color:${colorForex}">${statusForex}</span></div> <div class="asset-card"><span>USDJPY</span><span class="status-pill" style="background:rgba(255,68,68,0.15); color:${colorForex}">${statusForex}</span></div> </div> <div class="footer"> <div><b>DATA</b><p>${dataHora.split(',')[0]}</p></div> <div><b>HORA</b><p>${dataHora.split(',')[1]}</p></div> <div><b>VERSÃO</b><p style="color:var(--primary); font-weight:bold;">${versao}</p></div> <div><b>STATUS</b><p style="color:var(--primary)">TESTE M1 ATIVO</p></div> </div> <table class="revision-table"> <thead> <tr><th>Nº</th><th>DATA</th><th>HORA</th><th>MOTIVO</th></tr> </thead> <tbody> <tr><td>29</td><td>06/02/26</td><td>21:17</td><td>Correção Fuso Horário VELA (UTC-3)</td></tr> <tr><td>28</td><td>06/02/26</td><td>21:15</td><td>Estabilização M1 e Limpeza de Logs</td></tr> <tr><td>27</td><td>06/02/26</td><td>21:12</td><td>Retorno M1 + Auto-Teste de Conexão</td></tr> <tr><td>26</td><td>06/02/26</td><td>21:07</td><td>Aplicação M15 + Tabela de Revisão</td></tr> </tbody> </table> </div> <script>setTimeout(()=>location.reload(), 30000);</script> </body></html>
     `);
   } catch (e) { return res.status(200).send("OK"); }
 }
