@@ -78,15 +78,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       let sinalStr = "";
       let seta = "";
-      if (fractal_alta && rsi_call_valido && vela_verde) { sinalStr = "ACIMA"; seta = "↑"; }
-      if (fractal_baixa && rsi_put_valido && vela_vermelha) { sinalStr = "ABAIXO"; seta = "↓"; }
+      let emojiStatus = "";
+
+      if (fractal_alta && rsi_call_valido && vela_verde) { 
+        sinalStr = "ACIMA"; 
+        seta = "↑"; 
+        emojiStatus = "🟢";
+      }
+      if (fractal_baixa && rsi_put_valido && vela_vermelha) { 
+        sinalStr = "ABAIXO"; 
+        seta = "↓"; 
+        emojiStatus = "🔴";
+      }
 
       if (sinalStr && dentroDaJanela) {
         const opId = `${ativo.label}_${candles[i].t}`;
         if (!contextoOperacoes[opId]) {
           const horaVela = new Date(candles[i].t * 1000).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
           contextoOperacoes[opId] = { tipo: sinalStr, ts: candles[i].t, enviado: true };
-          const msg = `<b>SINAL EMITIDO!</b>\n\n<b>ATIVO:</b> ${ativo.label}\n<b>SINAL:</b> ${seta} ${sinalStr}\n<b>VELA:</b> ${horaVela}`;
+          
+          // Formatação simplificada conforme solicitado
+          const msg = `${emojiStatus} <b>SINAL EMITIDO!</b>\n<b>ATIVO:</b> ${ativo.label}\n<b>SINAL:</b> ${seta} ${sinalStr}\n<b>VELA:</b> ${horaVela}`;
+          
           await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id, text: msg, parse_mode: 'HTML' }) });
         }
       }
@@ -96,7 +109,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const operacao = contextoOperacoes[idAnterior];
           const lossDetectado = (operacao.tipo === "ACIMA" && vela_vermelha) || (operacao.tipo === "ABAIXO" && vela_verde);
           if (lossDetectado && minutoNaVela >= 12) {
-              const msgMtg = `⚠️ <b>ALERTA DE MARTINGALE!</b>\n\n<b>ATIVO:</b> ${ativo.label}\n<b>PROX. VELA:</b> ENTRADA M1`;
+              const msgMtg = `⚠️ <b>ALERTA DE MARTINGALE!</b>\n<b>ATIVO:</b> ${ativo.label}\n<b>PROX. VELA:</b> ENTRADA M1`;
               await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id, text: msgMtg, parse_mode: 'HTML' }) });
               contextoOperacoes[idAnterior].mtgAlerta = true;
           }
@@ -157,7 +170,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           <table class="revision-table"> 
             <thead> <tr><th>Nº</th><th>DATA</th><th>HORA</th><th>MOTIVO</th></tr> </thead> 
             <tbody> 
-              <tr><td>35</td><td>08/02/26</td><td>19:05</td><td>Layout Centralizado + Padronização de Cores</td></tr>
+              <tr><td>35</td><td>08/02/26</td><td>19:40</td><td>Novos Emojis e Formatação Telegram</td></tr>
               <tr><td>34</td><td>07/02/26</td><td>18:25</td><td>IA Martingale + Fibonacci + Bollinger</td></tr>
               <tr><td>33</td><td>07/02/26</td><td>15:45</td><td>Filtro de Janela 10min + Cores</td></tr> 
             </tbody> 
