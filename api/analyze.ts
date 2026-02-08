@@ -104,9 +104,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const statusForex = isForexOpen ? "ABERTO" : "FECHADO";
+    const bgForex = isForexOpen ? "rgba(0,255,136,0.15)" : "rgba(255,68,68,0.15)";
     const colorForex = isForexOpen ? "var(--primary)" : "#ff4444";
 
-    // LOGO SVG CUSTOMIZADA (Radar + R de Ricardo)
     const logoSvg = `<svg width="80" height="80" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="45" fill="none" stroke="#00ff88" stroke-width="2" stroke-dasharray="5,3"/><circle cx="50" cy="50" r="35" fill="none" stroke="#00ff88" stroke-width="1" opacity="0.5"/><path d="M50 15 L50 35 M85 50 L65 50 M50 85 L50 65 M15 50 L35 50" stroke="#00ff88" stroke-width="2"/><text x="50" y="65" font-family="Arial" font-size="40" font-weight="900" fill="#00ff88" text-anchor="middle">R</text></svg>`;
     const faviconBase64 = `data:image/svg+xml;base64,${Buffer.from(logoSvg).toString('base64')}`;
 
@@ -127,11 +127,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .status-badge { display: flex; align-items: center; justify-content: center; gap: 10px; background: rgba(0,255,136,0.08); border: 1px solid rgba(0,255,136,0.2); padding: 10px; border-radius: 14px; font-size: 11px; color: var(--primary); margin-bottom: 20px; } 
           .pulse-dot { height: 8px; width: 8px; background-color: var(--primary); border-radius: 50%; animation: pulse 1.5s infinite; } 
           @keyframes pulse { 0%, 100% { transform: scale(0.95); opacity: 1; } 50% { transform: scale(1.1); opacity: 0.5; } } 
-          .asset-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); padding: 12px 15px; border-radius: 12px; display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px; } 
-          .status-pill { font-size: 10px; font-weight: 800; padding: 4px 10px; border-radius: 6px; } 
-          .footer { margin-top: 25px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.08); display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 11px; } 
-          .footer b { color: #888; font-size: 9px; text-transform: uppercase; } 
-          .footer p { margin: 2px 0; font-family: 'JetBrains Mono', monospace; font-size: 12px; } 
+          .asset-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); padding: 12px 15px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 14px; } 
+          .status-pill { font-size: 10px; font-weight: 800; padding: 6px 12px; border-radius: 6px; text-align: center; min-width: 60px; } 
+          .footer { margin-top: 25px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.08); display: grid; grid-template-columns: 1fr 1fr; gap: 15px; text-align: center; } 
+          .footer b { color: #888; font-size: 9px; text-transform: uppercase; display: block; margin-bottom: 4px; } 
+          .footer p { margin: 0; font-family: 'JetBrains Mono', monospace; font-size: 12px; } 
           .revision-table { width: 100%; margin-top: 25px; border-collapse: collapse; font-size: 9px; color: rgba(255,255,255,0.7); } 
           .revision-table th { text-align: left; color: var(--primary); border-bottom: 1px solid rgba(255,255,255,0.1); padding: 5px; text-transform: uppercase; } 
           .revision-table td { padding: 5px; border-bottom: 1px solid rgba(255,255,255,0.05); } 
@@ -144,20 +144,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           <div class="status-badge"><div class="pulse-dot"></div> EM MONITORAMENTO...</div> 
           <div class="asset-grid"> 
             <div class="asset-card"><span>BTCUSD</span><span class="status-pill" style="background:rgba(0,255,136,0.15); color:var(--primary)">ABERTO</span></div> 
-            <div class="asset-card"><span>EURUSD</span><span class="status-pill" style="background:rgba(255,68,68,0.15); color:${colorForex}">${statusForex}</span></div> 
-            <div class="asset-card"><span>GBPUSD</span><span class="status-pill" style="background:rgba(255,68,68,0.15); color:${colorForex}">${statusForex}</span></div> 
-            <div class="asset-card"><span>USDJPY</span><span class="status-pill" style="background:rgba(255,68,68,0.15); color:${colorForex}">${statusForex}</span></div> 
+            <div class="asset-card"><span>EURUSD</span><span class="status-pill" style="background:${bgForex}; color:${colorForex}">${statusForex}</span></div> 
+            <div class="asset-card"><span>GBPUSD</span><span class="status-pill" style="background:${bgForex}; color:${colorForex}">${statusForex}</span></div> 
+            <div class="asset-card"><span>USDJPY</span><span class="status-pill" style="background:${bgForex}; color:${colorForex}">${statusForex}</span></div> 
           </div> 
           <div class="footer"> 
             <div><b>DATA</b><p>${dataHora.split(',')[0]}</p></div> 
             <div><b>HORA</b><p>${dataHora.split(',')[1]}</p></div> 
             <div><b>VERSÃO</b><p style="color:var(--primary); font-weight:bold;">${versao}</p></div> 
-            <div><b>STATUS</b><p style="color:var(--primary)">ATIVO</p></div> 
+            <div><b>STATUS</b><p style="color:var(--primary); font-weight:bold;">ATIVO</p></div> 
           </div> 
           <table class="revision-table"> 
             <thead> <tr><th>Nº</th><th>DATA</th><th>HORA</th><th>MOTIVO</th></tr> </thead> 
             <tbody> 
-              <tr><td>35</td><td>08/02/26</td><td>18:55</td><td>Logo Exclusiva Ricardo Sentinela + Calibragem</td></tr>
+              <tr><td>35</td><td>08/02/26</td><td>19:05</td><td>Layout Centralizado + Padronização de Cores</td></tr>
               <tr><td>34</td><td>07/02/26</td><td>18:25</td><td>IA Martingale + Fibonacci + Bollinger</td></tr>
               <tr><td>33</td><td>07/02/26</td><td>15:45</td><td>Filtro de Janela 10min + Cores</td></tr> 
             </tbody> 
