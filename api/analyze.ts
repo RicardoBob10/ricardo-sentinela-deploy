@@ -1,7 +1,7 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 
 // Memória temporária para sinais e contextos
-let contextoOperacoes: Record<string, any> = {};
+let lastSinais: Record<string, any> = {};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const token = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
@@ -25,7 +25,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     { symbol: "USDJPY=X", label: "USDJPY", source: "yahoo", type: "forex" }
   ];
 
-  // --- FUNÇÕES DE CÁLCULO (LÓGICA V36) ---
+  // --- FUNÇÕES AUXILIARES DE CÁLCULO (LÓGICA V36) ---
   const calcularRSI = (dados: any[], idx: number) => {
     let gains = 0, losses = 0;
     for (let j = idx - 8; j <= idx; j++) {
@@ -41,7 +41,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const sma = slice.reduce((a, b) => a + b.c, 0) / slice.length;
     const variance = slice.reduce((a, b) => a + Math.pow(b.c - sma, 2), 0) / slice.length;
     const stdDev = Math.sqrt(variance);
-    return { width: ((sma + (2 * stdDev)) - (sma - (2 * stdDev))) / sma };
+    const upper = sma + (2 * stdDev);
+    const lower = sma - (2 * stdDev);
+    return { upper, lower, width: (upper - lower) / sma };
   };
 
   const isDoji = (candle: any) => {
@@ -54,7 +56,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     for (const ativo of ATIVOS) {
       if (ativo.type === "forex" && !isForexOpen) continue;
 
-      // 1. DADOS M15
       const urlM15 = ativo.source === "kucoin" 
         ? `https://api.kucoin.com/api/v1/market/candles?symbol=${ativo.symbol}&type=15min`
         : `https://query1.finance.yahoo.com/v8/finance/chart/${ativo.symbol}?interval=15m&range=1d`;
@@ -78,40 +79,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (candlesM15.length < 30) continue;
       const i = candlesM15.length - 1; 
 
-      // LÓGICA DE SINAL (IDÊNTICA V35/V36)
       const rsi_val = calcularRSI(candlesM15, i);
       const rsi_ant = calcularRSI(candlesM15, i - 1);
-      const fractal_alta = candlesM15[i-2].l < candlesM15[i-4].l && candlesM15[i-2].l < candlesM15[i-3].l && candlesM15[i-2].l < candlesM15[i-1].l && candlesM15[i-2].l < candlesM15[i].l;
-      const fractal_baixa = candlesM15[i-2].h > candlesM15[i-4].h && candlesM15[i-2].h > candlesM15[i-3].h && candlesM15[i-2].h > candlesM15[i-1].h && candlesM15[i-2].h > candlesM15[i].h;
+      const fractal_alta = candlesM15[i-2].l < Math.min(candlesM15[i-4].l, candlesM15[i-3].l, candlesM15[i-1].l, candlesM15[i].l);
+      const fractal_baixa = candlesM15[i-2].h > Math.max(candlesM15[i-4].h, candlesM15[i-3].h, candlesM15[i-1].h, candlesM15[i].h);
       
       const rsi_call_valido = (rsi_val >= 55 || rsi_val >= 30) && rsi_val > rsi_ant;
       const rsi_put_valido = (rsi_val <= 45 || rsi_val <= 70) && rsi_val < rsi_ant;
 
       let sinalStr = "";
-      let seta = "";
-      let emojiStatus = "";
+      if (fractal_alta && rsi_call_valido && candlesM15[i].c > candlesM15[i].o) sinalStr = "ACIMA";
+      if (fractal_baixa && rsi_put_valido && candlesM15[i].c < candlesM15[i].o) sinalStr = "ABAIXO";
 
-      if (fractal_alta && rsi_call_valido && candlesM15[i].c > candlesM15[i].o) { 
-        sinalStr = "ACIMA"; seta = "↑"; emojiStatus = "🟢";
-      }
-      if (fractal_baixa && rsi_put_valido && candlesM15[i].c < candlesM15[i].o) { 
-        sinalStr = "ABAIXO"; seta = "↓"; emojiStatus = "🔴";
-      }
-
-      // DISPARO SINAL ORIGINAL
       if (sinalStr && dentroDaJanela) {
         const opId = `${ativo.label}_${candlesM15[i].t}`;
-        if (!contextoOperacoes[opId]) {
-          const horaVela = new Date(candlesM15[i].t * 1000).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
-          contextoOperacoes[opId] = { tipo: sinalStr, ts: candlesM15[i].t, precoEntrada: candlesM15[i].c, mtgEnviado: false };
-          const msg = `${emojiStatus} <b>SINAL EMITIDO!</b>\n<b>ATIVO:</b> ${ativo.label}\n<b>SINAL:</b> ${seta} ${sinalStr}\n<b>VELA:</b> ${horaVela}`;
+        if (!lastSinais[opId]) {
+          const hVela = new Date(candlesM15[i].t * 1000).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
+          lastSinais[opId] = { enviado: true, tipo: sinalStr, precoEntrada: candlesM15[i].c, mtgEnviado: false, ts: candlesM15[i].t };
+          const emoji = sinalStr === "ACIMA" ? "🟢" : "🔴";
+          const seta = sinalStr === "ACIMA" ? "↑" : "↓";
+          const msg = `${emoji} <b>SINAL EMITIDO!</b>\n<b>ATIVO:</b> ${ativo.label}\n<b>SINAL:</b> ${seta} ${sinalStr}\n<b>VELA:</b> ${hVela}`;
           await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id, text: msg, parse_mode: 'HTML' }) });
         }
       }
 
-      // --- MONITORAMENTO MARTINGALE (LÓGICA V36) ---
-      const ctx = contextoOperacoes[`${ativo.label}_${candlesM15[i].t}`];
-      if (ctx && !ctx.mtgEnviado && minutoNaVela >= 3 && minutoNaVela <= 10) {
+      // MONITORAMENTO MARTINGALE V36
+      const context = lastSinais[`${ativo.label}_${candlesM15[i].t}`];
+      if (context && !context.mtgEnviado && minutoNaVela >= 3 && minutoNaVela <= 10) {
         const urlM1 = ativo.source === "kucoin" 
           ? `https://api.kucoin.com/api/v1/market/candles?symbol=${ativo.symbol}&type=1min`
           : `https://query1.finance.yahoo.com/v8/finance/chart/${ativo.symbol}?interval=1m&range=1d`;
@@ -132,35 +126,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const volM1 = candlesM1[m1Idx].v;
         const avgVol = candlesM1.slice(-21, -1).reduce((a, b) => a + b.v, 0) / 20;
         
-        const vAntM15 = candlesM15[i-1];
-        const corpoM15 = Math.abs(vAntM15.c - vAntM15.o);
-        const fib50 = (vAntM15.o + vAntM15.c) / 2;
-        const isRed = vAntM15.o > vAntM15.c;
-        const fib618 = isRed ? vAntM15.c + (corpoM15 * 0.618) : vAntM15.o + (corpoM15 * 0.618);
-        const fib382 = isRed ? vAntM15.c + (corpoM15 * 0.382) : vAntM15.o + (corpoM15 * 0.382);
+        const vAnt = candlesM15[i-1];
+        const corpo = Math.abs(vAnt.c - vAnt.o);
+        const fib50 = (vAnt.o + vAnt.c) / 2;
+        const fib618 = vAnt.o > vAnt.c ? vAnt.c + (corpo * 0.618) : vAnt.o + (corpo * 0.618);
+        const fib382 = vAnt.o > vAnt.c ? vAnt.c + (corpo * 0.382) : vAnt.o + (corpo * 0.382);
 
         const bb = getBollinger(candlesM15, i);
         const rsiM1 = calcularRSI(candlesM1, m1Idx);
         const rsiM1Ant = calcularRSI(candlesM1, m1Idx - 1);
         const threshBB = ativo.label === "BTCUSD" ? 0.04 : 0.02;
 
-        let atendeFib = false;
-        if (ctx.tipo === "ACIMA" && precoAtual < ctx.precoEntrada) {
-           if (precoAtual >= Math.min(fib50, fib618) && precoAtual <= Math.max(fib50, fib618) && precoAtual > fib382 && rsiM1 < 45 && rsiM1 > rsiM1Ant) atendeFib = true;
-        } else if (ctx.tipo === "ABAIXO" && precoAtual > ctx.precoEntrada) {
-           if (precoAtual >= Math.min(fib50, fib618) && precoAtual <= Math.max(fib50, fib618) && precoAtual < fib382 && rsiM1 > 55 && rsiM1 < rsiM1Ant) atendeFib = true;
+        let podeMtg = false;
+        if (context.tipo === "ACIMA" && precoAtual < context.precoEntrada) {
+          if (precoAtual >= Math.min(fib50, fib618) && precoAtual <= Math.max(fib50, fib618) && precoAtual > fib382 && rsiM1 < 45 && rsiM1 > rsiM1Ant) podeMtg = true;
+        } else if (context.tipo === "ABAIXO" && precoAtual > context.precoEntrada) {
+          if (precoAtual >= Math.min(fib50, fib618) && precoAtual <= Math.max(fib50, fib618) && precoAtual < fib382 && rsiM1 > 55 && rsiM1 < rsiM1Ant) podeMtg = true;
         }
 
-        if (atendeFib && !isDoji(vAntM15) && (volM1/avgVol) >= 0.8 && bb.width >= threshBB) {
-          ctx.mtgEnviado = true;
-          const rsiStatus = rsiM1 < 30 || rsiM1 > 70 ? "(oversold - FORTE)" : "(moderado)";
-          const msgMtg = `⚠️ <b>ALERTA DE MARTINGALE</b>\n\n${ctx.tipo === "ACIMA" ? "🟢" : "🔴"} <b>Sinal:</b> ${ctx.tipo === "ACIMA" ? "↑" : "↓"} ${ctx.tipo}\n💰 <b>Ativo:</b> ${ativo.label}\n🕐 <b>Vela:</b> ${new Date(ctx.ts * 1000).toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'})}\n📊 <b>Fibonacci:</b> Rejeitou e voltou (OK)\n📈 <b>RSI:</b> ${rsiM1.toFixed(1)} ${rsiStatus}\n📊 <b>Volume:</b> ${(volM1/avgVol).toFixed(1)}x média\n📏 <b>Bollinger:</b> ${(bb.width*100).toFixed(1)}%\n⏰ <b>Tempo restante:</b> ${15 - minutoNaVela} minutos\n\n✅ <b>Condições favoráveis para martingale</b>`;
+        if (podeMtg && !isDoji(vAnt) && (volM1/avgVol) >= 0.8 && bb.width >= threshBB) {
+          context.mtgEnviado = true;
+          const msgMtg = `⚠️ <b>ALERTA DE MARTINGALE</b>\n\n${context.tipo === "ACIMA" ? "🟢" : "🔴"} <b>Sinal:</b> ${context.tipo === "ACIMA" ? "↑" : "↓"} ${context.tipo}\n💰 <b>Ativo:</b> ${ativo.label}\n📊 <b>Fibonacci:</b> Rejeitou 50-61.8%\n📈 <b>RSI:</b> ${rsiM1.toFixed(1)}\n📊 <b>Volume:</b> ${(volM1/avgVol).toFixed(1)}x\n📏 <b>Bollinger:</b> ${(bb.width*100).toFixed(1)}%\n✅ <b>Condições favoráveis!</b>`;
           await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id, text: msgMtg, parse_mode: 'HTML' }) });
         }
       }
     }
 
-    // --- HTML E DASHBOARD (ESTILO V35) ---
+    // --- RESTAURAÇÃO DO HTML VERSÃO 35 ---
     const statusForex = isForexOpen ? "ABERTO" : "FECHADO";
     const bgForex = isForexOpen ? "rgba(0,255,136,0.15)" : "rgba(255,68,68,0.15)";
     const colorForex = isForexOpen ? "var(--primary)" : "#ff4444";
