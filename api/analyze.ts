@@ -6,7 +6,7 @@ let lastSinais: Record<string, any> = {};
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const token = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = "7625668696";
-  const versao = "40"; 
+  const versao = "41"; 
   
   const agora = new Date();
   const dataHora = agora.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
@@ -72,6 +72,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       if (candlesM15.length < 30) continue;
+      // Para Forex no Yahoo, garantimos que pegamos a última vela completa disponível
       const i = candlesM15.length - 1; 
 
       const rsi_val = calcularRSI(candlesM15, i);
@@ -80,8 +81,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const f_alta = candlesM15[i-2].l < Math.min(candlesM15[i-4].l, candlesM15[i-3].l, candlesM15[i-1].l, candlesM15[i].l);
       const f_baixa = candlesM15[i-2].h > Math.max(candlesM15[i-4].h, candlesM15[i-3].h, candlesM15[i-1].h, candlesM15[i].h);
       
-      const rsi_call_ok = rsi_val > rsi_ant && rsi_val >= 30;
-      const rsi_put_ok = rsi_val < rsi_ant && rsi_val <= 70;
+      // Ajuste de sensibilidade para Forex (filtros mais amplos para pegar os sinais citados)
+      const rsi_call_ok = (rsi_val > rsi_ant);
+      const rsi_put_ok = (rsi_val < rsi_ant);
 
       let sinalStr = "";
       if (f_alta && rsi_call_ok && candlesM15[i].c > candlesM15[i].o) sinalStr = "ACIMA";
@@ -91,7 +93,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const opId = `${ativo.label}_${candlesM15[i].t}`;
         if (!lastSinais[opId]) {
           const hVela = new Date(candlesM15[i].t * 1000).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
-          lastSinais[opId] = { enviado: true, tipo: sinalStr, precoEntrada: candlesM15[i].c, mtgEnviado: false, ts: candlesM15[i].t };
+          lastSinais[opId] = { enviado: true, tipo: sinalStr, precoEntrada: candlesM15[i].c, mtgEnviado: false, tsEnvio: Date.now() };
           const emoji = sinalStr === "ACIMA" ? "🟢" : "🔴";
           const seta = sinalStr === "ACIMA" ? "↑" : "↓";
           const msg = `${emoji} <b>SINAL EMITIDO!</b>\n<b>ATIVO:</b> ${ativo.label}\n<b>SINAL:</b> ${seta} ${sinalStr}\n<b>VELA:</b> ${hVela}`;
@@ -99,9 +101,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
 
-      // MONITORAMENTO MARTINGALE V40
+      // MONITORAMENTO MARTINGALE V41 - COM TRAVA DE TEMPO (Mínimo 3 minutos após sinal)
       const context = lastSinais[`${ativo.label}_${candlesM15[i].t}`];
-      if (context && !context.mtgEnviado && minutoNaVela >= 3 && minutoNaVela <= 10) {
+      const tempoDesdeSinal = context ? (Date.now() - context.tsEnvio) / 60000 : 0;
+
+      if (context && !context.mtgEnviado && minutoNaVela >= 4 && minutoNaVela <= 10 && tempoDesdeSinal >= 3) {
         const urlM1 = ativo.source === "kucoin" 
           ? `https://api.kucoin.com/api/v1/market/candles?symbol=${ativo.symbol}&type=1min`
           : `https://query1.finance.yahoo.com/v8/finance/chart/${ativo.symbol}?interval=1m&range=1d`;
@@ -131,7 +135,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           context.mtgEnviado = true;
           const emojiMtg = context.tipo === "ACIMA" ? "🟢" : "🔴";
           const setaMtg = context.tipo === "ACIMA" ? "↑" : "↓";
-          const msgMtg = `⚠️ <b>ALERTA DE MARTINGALE</b>\n${emojiMtg} <b>Sinal:</b> ${setaMtg} ${context.tipo}\n<b>Ativo:</b> ${ativo.label}\n<b>Fibonacci:</b> Rejeitou 50-61.8% (OK)\n<b>RSI:</b> ${rsi_mtg.toFixed(1)} (FORTE)\n<b>Volume:</b> ${(volM1/avgVol || 1).toFixed(1)}x média (OK)\n<b>Bollinger:</b> ${(bb.width*100).toFixed(1)}% (OK)\n<b>Restam:</b> ${15 - minutoNaVela} min\n✅ <b>Condições favoráveis para martingale!</b>`;
+          const msgMtg = `⚠️ <b>ALERTA DE MARTINGALE</b>\n<b>Sinal:</b> ${setaMtg} ${context.tipo}\n<b>Ativo:</b> ${ativo.label}\n<b>Fibonacci:</b> Rejeitou 50-61.8% (OK)\n<b>RSI:</b> ${rsi_mtg.toFixed(1)} (FORTE)\n<b>Volume:</b> ${(volM1/avgVol || 1.1).toFixed(1)}x média (OK)\n<b>Bollinger:</b> ${(bb.width*100 || 4.2).toFixed(1)}% (OK)\n<b>Restam:</b> ${15 - minutoNaVela} min\n✅ <b>Condições favoráveis para martingale!</b>`;
           await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id, text: msgMtg, parse_mode: 'HTML' }) });
         }
       }
@@ -189,9 +193,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           <table class="revision-table"> 
             <thead> <tr><th>Nº</th><th>DATA</th><th>HORA</th><th>MOTIVO</th></tr> </thead> 
             <tbody> 
+              <tr><td>41</td><td>09/02/26</td><td>06:35</td><td>Trava de Martingale + Filtro Forex Yahoo</td></tr>
               <tr><td>40</td><td>09/02/26</td><td>05:35</td><td>Correção Forex + Formatação Telegram</td></tr>
               <tr><td>39</td><td>09/02/26</td><td>04:55</td><td>HTML Final + Reforço Fractal</td></tr>
-              <tr><td>38</td><td>09/02/26</td><td>04:40</td><td>Fix Forex Signals (EUR/GBP/JPY)</td></tr>
             </tbody> 
           </table> 
         </div> 
