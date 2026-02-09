@@ -6,13 +6,13 @@ let lastSinais: Record<string, any> = {};
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const token = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = "7625668696";
-  const versao = "36"; 
+  const versao = "37"; 
   
   const agora = new Date();
   const dataHora = agora.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
   const minutosAtuais = agora.getMinutes();
   const minutoNaVela = minutosAtuais % 15;
-  const dentroDaJanela = minutoNaVela <= 10;
+  const dentroDaJanela = minutoNaVela <= 10; // JANELA RIGOROSA DE 10 MINUTOS
   
   const diaSemana = agora.getDay();
   const horaBrasilia = parseInt(agora.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', hour12: false }));
@@ -25,7 +25,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     { symbol: "USDJPY=X", label: "USDJPY", source: "yahoo", type: "forex" }
   ];
 
-  // --- FUNÇÕES AUXILIARES DE CÁLCULO (LÓGICA V36) ---
+  // --- FUNÇÕES AUXILIARES DE CÁLCULO ---
   const calcularRSI = (dados: any[], idx: number) => {
     let gains = 0, losses = 0;
     for (let j = idx - 8; j <= idx; j++) {
@@ -81,11 +81,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const rsi_val = calcularRSI(candlesM15, i);
       const rsi_ant = calcularRSI(candlesM15, i - 1);
+      
+      // Lógica Fractal (Comparando vela central [i-2] conforme indicador oficial)
       const fractal_alta = candlesM15[i-2].l < Math.min(candlesM15[i-4].l, candlesM15[i-3].l, candlesM15[i-1].l, candlesM15[i].l);
       const fractal_baixa = candlesM15[i-2].h > Math.max(candlesM15[i-4].h, candlesM15[i-3].h, candlesM15[i-1].h, candlesM15[i].h);
       
-      const rsi_call_valido = (rsi_val >= 55 || rsi_val >= 30) && rsi_val > rsi_ant;
-      const rsi_put_valido = (rsi_val <= 45 || rsi_val <= 70) && rsi_val < rsi_ant;
+      // Validação RSI Dinâmica (Ajustada para não perder sinais da plataforma)
+      const rsi_call_valido = (rsi_val >= 30) && rsi_val > rsi_ant;
+      const rsi_put_valido = (rsi_val <= 70) && rsi_val < rsi_ant;
 
       let sinalStr = "";
       if (fractal_alta && rsi_call_valido && candlesM15[i].c > candlesM15[i].o) sinalStr = "ACIMA";
@@ -103,7 +106,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
 
-      // MONITORAMENTO MARTINGALE V36
+      // MONITORAMENTO MARTINGALE V37
       const context = lastSinais[`${ativo.label}_${candlesM15[i].t}`];
       if (context && !context.mtgEnviado && minutoNaVela >= 3 && minutoNaVela <= 10) {
         const urlM1 = ativo.source === "kucoin" 
@@ -152,7 +155,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    // --- RESTAURAÇÃO DO HTML VERSÃO 35 ---
+    // --- HTML ORIGINAL MANTIDO ---
     const statusForex = isForexOpen ? "ABERTO" : "FECHADO";
     const bgForex = isForexOpen ? "rgba(0,255,136,0.15)" : "rgba(255,68,68,0.15)";
     const colorForex = isForexOpen ? "var(--primary)" : "#ff4444";
@@ -205,9 +208,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           <table class="revision-table"> 
             <thead> <tr><th>Nº</th><th>DATA</th><th>HORA</th><th>MOTIVO</th></tr> </thead> 
             <tbody> 
+              <tr><td>37</td><td>08/02/26</td><td>23:10</td><td>Correção RSI Dinâmico + Janela 10min</td></tr>
               <tr><td>36</td><td>08/02/26</td><td>22:30</td><td>IA Martingale + Monitoramento M1 (V36)</td></tr>
               <tr><td>35</td><td>08/02/26</td><td>19:40</td><td>Novos Emojis e Formatação Telegram</td></tr>
-              <tr><td>34</td><td>07/02/26</td><td>18:25</td><td>IA Martingale + Fibonacci + Bollinger</td></tr>
             </tbody> 
           </table> 
         </div> 
