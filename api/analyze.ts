@@ -6,7 +6,7 @@ let lastSinais: Record<string, boolean> = {};
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const token = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = "7625668696";
-  const versao = "50"; 
+  const versao = "51"; 
   
   const agora = new Date();
   const options: Intl.DateTimeFormatOptions = { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false };
@@ -16,13 +16,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const diaSemana = agora.getDay();
   const dataHora = agora.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 
-  // --- STATUS DO MERCADO (REGRAS OPENEX) ---
+  // --- STATUS DO MERCADO (BTCUSD E EURUSD APENAS) ---
   const getStatus = (label: string): boolean => {
     if (label === "BTCUSD") return true;
-    if (label === "USDJPY") {
-      return (diaSemana >= 1 && diaSemana <= 5) && (horaFormatada >= 0 && horaFormatada <= 1600);
-    }
-    if (label === "EURUSD" || label === "GBPUSD") {
+    if (label === "EURUSD") {
       if (diaSemana >= 1 && diaSemana <= 4) return (horaFormatada >= 0 && horaFormatada <= 1800) || (horaFormatada >= 2200);
       if (diaSemana === 5) return (horaFormatada >= 0 && horaFormatada <= 1630);
       if (diaSemana === 0) return (horaFormatada >= 2200);
@@ -32,9 +29,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const ATIVOS = [
     { symbol: "BTC-USDT", label: "BTCUSD", source: "kucoin" },
-    { symbol: "EURUSD=X", label: "EURUSD", source: "yahoo" },
-    { symbol: "GBPUSD=X", label: "GBPUSD", source: "yahoo" },
-    { symbol: "USDJPY=X", label: "USDJPY", source: "yahoo" }
+    { symbol: "EURUSD=X", label: "EURUSD", source: "yahoo" }
   ];
 
   const calcularRSI = (dados: any[], idx: number) => {
@@ -50,8 +45,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     for (const ativo of ATIVOS) {
-      const isAberto = getStatus(ativo.label);
-      if (!isAberto) continue;
+      if (!getStatus(ativo.label)) continue;
 
       const cacheBuster = Date.now();
       const urlM15 = ativo.source === "kucoin" 
@@ -76,45 +70,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (candles.length < 10) continue;
       
-      const i = candles.length - 1; // Vela atual em processamento
+      const i = candles.length - 1; // Vela atual (em formação)
       const minutoNaVela = agora.getMinutes() % 15;
 
       // --- LÓGICA SYNC RT_ROBO_V.01 (FRACTAL 5 PERÍODOS) ---
-      // Para alinhar com o low[2] da plataforma:
-      // O ponto central do fractal é candles[i-2]
-      // Confirmação (as 2 posteriores) são candles[i-1] e candles[i]
+      // Na Optnex, o fractal aparece na vela low[2]. 
+      // Para o robô disparar no fechamento da confirmação:
+      // Ponto Central: i-3 | Posteriores (Confirmação): i-2 e i-1
       
       const rsi_val = calcularRSI(candles, i - 1);
       const rsi_ant = calcularRSI(candles, i - 2);
       const rsi_subindo = rsi_val > rsi_ant;
       const rsi_caindo = rsi_val < rsi_ant;
 
-      // Fractal de Alta (Gatilho para ACIMA): mínima de i-2 menor que i-4, i-3, i-1 e i
-      const f_alta = candles[i-2].l < candles[i-4].l && 
-                     candles[i-2].l < candles[i-3].l && 
-                     candles[i-2].l < candles[i-1].l && 
-                     candles[i-2].l < candles[i].l;
+      // Fractal de Alta (Gatilho para ACIMA)
+      const f_alta = candles[i-3].l < candles[i-5].l && 
+                     candles[i-3].l < candles[i-4].l && 
+                     candles[i-3].l < candles[i-2].l && 
+                     candles[i-3].l < candles[i-1].l;
 
-      // Fractal de Baixa (Gatilho para ABAIXO): máxima de i-2 maior que i-4, i-3, i-1 e i
-      const f_baixa = candles[i-2].h > candles[i-4].h && 
-                      candles[i-2].h > candles[i-3].h && 
-                      candles[i-2].h > candles[i-1].h && 
-                      candles[i-2].h > candles[i].h;
+      // Fractal de Baixa (Gatilho para ABAIXO)
+      const f_baixa = candles[i-3].h > candles[i-5].h && 
+                      candles[i-3].h > candles[i-4].h && 
+                      candles[i-3].h > candles[i-2].h && 
+                      candles[i-3].h > candles[i-1].h;
 
       const rsi_call_ok = (rsi_val >= 55 || rsi_val >= 30) && rsi_subindo;
       const rsi_put_ok = (rsi_val <= 45 || rsi_val <= 70) && rsi_caindo;
 
       let sinalStr = "";
-      // Validação da cor da vela de confirmação (i-1) conforme script
+      // Cor da vela i-1 (fechada) deve confirmar a direção
       if (f_alta && rsi_call_ok && candles[i-1].c > candles[i-1].o) sinalStr = "ACIMA";
       if (f_baixa && rsi_put_ok && candles[i-1].c < candles[i-1].o) sinalStr = "ABAIXO";
 
       const opId = `${ativo.label}_${candles[i].t}`;
 
-      // Envio nos primeiros minutos da vela de 15min para garantir sincronia
+      // Envio apenas nos primeiros 2 minutos da vela de execução
       if (sinalStr && minutoNaVela <= 2 && !lastSinais[opId]) {
-        const dataVela = new Date(candles[i].t * 1000);
-        const hVela = dataVela.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
+        const hVela = new Date(candles[i].t * 1000).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
         
         lastSinais[opId] = true;
         
@@ -130,10 +123,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // --- CONFIGURAÇÃO HTML ---
-    const isForexOpen = getStatus("EURUSD");
-    const statusForex = isForexOpen ? "ABERTO" : "FECHADO";
-    const bgForex = isForexOpen ? "rgba(0,255,136,0.15)" : "rgba(255,68,68,0.15)";
-    const colorForex = isForexOpen ? "var(--primary)" : "#ff4444";
+    const isEurusdOpen = getStatus("EURUSD");
+    const statusEur = isEurusdOpen ? "ABERTO" : "FECHADO";
+    const bgEur = isEurusdOpen ? "rgba(0,255,136,0.15)" : "rgba(255,68,68,0.15)";
+    const colorEur = isEurusdOpen ? "var(--primary)" : "#ff4444";
     const logoSvg = `<svg width="80" height="80" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="45" fill="none" stroke="#00ff88" stroke-width="2" stroke-dasharray="5,3"/><circle cx="50" cy="50" r="35" fill="none" stroke="#00ff88" stroke-width="1" opacity="0.5"/><path d="M50 15 L50 35 M85 50 L65 50 M50 85 L50 65 M15 50 L35 50" stroke="#00ff88" stroke-width="2"/><text x="50" y="65" font-family="Arial" font-size="40" font-weight="900" fill="#00ff88" text-anchor="middle">R</text></svg>`;
     const faviconBase64 = `data:image/svg+xml;base64,${Buffer.from(logoSvg).toString('base64')}`;
 
@@ -170,9 +163,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           <div class="status-badge"><div class="pulse-dot"></div> EM MONITORAMENTO...</div> 
           <div class="asset-grid"> 
             <div class="asset-card"><span>BTCUSD</span><span class="status-pill" style="background:rgba(0,255,136,0.15); color:var(--primary)">ABERTO</span></div> 
-            <div class="asset-card"><span>EURUSD</span><span class="status-pill" style="background:${bgForex}; color:${colorForex}">${statusForex}</span></div> 
-            <div class="asset-card"><span>GBPUSD</span><span class="status-pill" style="background:${bgForex}; color:${colorForex}">${statusForex}</span></div> 
-            <div class="asset-card"><span>USDJPY</span><span class="status-pill" style="background:${bgForex}; color:${colorForex}">${statusForex}</span></div> 
+            <div class="asset-card"><span>EURUSD</span><span class="status-pill" style="background:${bgEur}; color:${colorEur}">${statusEur}</span></div> 
           </div> 
           <div class="footer"> 
             <div><b>DATA</b><p>${dataHora.split(',')[0]}</p></div> 
@@ -183,11 +174,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           <table class="revision-table"> 
             <thead> <tr><th>Nº</th><th>DATA</th><th>HORA</th><th>MOTIVO</th></tr> </thead> 
             <tbody> 
+              <tr><td>51</td><td>12/02/26</td><td>20:52</td><td>Removido GBP e JPY + Refinamento Fractal</td></tr>
               <tr><td>50</td><td>12/02/26</td><td>20:30</td><td>Sync Fractal i-2 + Histórico 5v</td></tr>
               <tr><td>49</td><td>12/02/26</td><td>20:05</td><td>Remoção Martingale + Sync Fractal Optnex</td></tr>
               <tr><td>48</td><td>12/02/26</td><td>19:55</td><td>Fix Envio BTCUSD + RT_ROBO_V.01 Sync</td></tr>
               <tr><td>37</td><td>08/02/26</td><td>23:10</td><td>Correção RSI Dinâmico + Janela 10min</td></tr>
-              <tr><td>36</td><td>08/02/26</td><td>22:30</td><td>IA Martingale + Monitoramento M1 (V36)</td></tr>
             </tbody> 
           </table> 
         </div> 
