@@ -1,22 +1,22 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 
-// Memória temporária para sinais e contextos
-let lastSinais: Record<string, any> = {};
+// Memória temporária para evitar duplicidade de sinais
+let lastSinais: Record<string, boolean> = {};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const token = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = "7625668696";
-  const versao = "48"; 
+  const versao = "49"; 
   
   const agora = new Date();
   const options: Intl.DateTimeFormatOptions = { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false };
   const horaBRString = agora.toLocaleTimeString('pt-BR', options);
   const [h, m] = horaBRString.split(':').map(Number);
   const horaFormatada = h * 100 + m;
-  const diaSemana = agora.getDay(); // 0=Dom, 1=Seg, ..., 6=Sab
+  const diaSemana = agora.getDay();
   const dataHora = agora.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 
-  // --- FUNÇÕES DE STATUS DO MERCADO (REGRAS OPENEX) ---
+  // --- STATUS DO MERCADO ---
   const getStatus = (label: string): boolean => {
     if (label === "BTCUSD") return true;
     if (label === "USDJPY") {
@@ -37,7 +37,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     { symbol: "USDJPY=X", label: "USDJPY", source: "yahoo" }
   ];
 
-  // RSI de 9 períodos conforme Script RT_ROBO_V.01
+  // RSI de 9 períodos (Conforme Script RT_ROBO_V.01)
   const calcularRSI = (dados: any[], idx: number) => {
     if (idx < 10) return 50;
     let gains = 0, losses = 0;
@@ -51,8 +51,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     for (const ativo of ATIVOS) {
-      const aberto = getStatus(ativo.label);
-      if (!aberto) continue;
+      if (!getStatus(ativo.label)) continue;
 
       const cacheBuster = Date.now();
       const urlM15 = ativo.source === "kucoin" 
@@ -77,36 +76,47 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (candles.length < 10) continue;
       
-      const i = candles.length - 1; // Vela atual (em formação)
+      const i = candles.length - 1; // Vela atual (M15 rodando)
       const minutoNaVela = agora.getMinutes() % 15;
 
-      // --- LÓGICA RT_ROBO_V.01 (FRACTAL + RSI 9) ---
+      // --- LÓGICA SYNC RT_ROBO_V.01 ---
+      // No script Pine: low[2] < low[4] e low[3] e low[1] e low[0]
+      // No nosso código (quando i é a vela atual):
+      // A vela do sinal (central) é a candles[i-2]
+      // As anteriores são candles[i-4] e candles[i-3]
+      // As posteriores (confirmação) são candles[i-1] e candles[i]
+      
       const rsi_val = calcularRSI(candles, i - 1);
       const rsi_ant = calcularRSI(candles, i - 2);
       const rsi_subindo = rsi_val > rsi_ant;
       const rsi_caindo = rsi_val < rsi_ant;
 
-      // Fractal (Baseado no script: 2 velas antes e 2 depois do ponto central i-3)
-      const f_alta = candles[i-3].l < candles[i-5].l && candles[i-3].l < candles[i-4].l && candles[i-3].l < candles[i-2].l && candles[i-3].l < candles[i-1].l;
-      const f_baixa = candles[i-3].h > candles[i-5].h && candles[i-3].h > candles[i-4].h && candles[i-3].h > candles[i-2].h && candles[i-3].h > candles[i-1].h;
+      // Fractal de Alta (Gatilho para ACIMA)
+      const f_alta = candles[i-2].l < candles[i-4].l && 
+                     candles[i-2].l < candles[i-3].l && 
+                     candles[i-2].l < candles[i-1].l && 
+                     candles[i-2].l < candles[i].l;
+
+      // Fractal de Baixa (Gatilho para ABAIXO)
+      const f_baixa = candles[i-2].h > candles[i-4].h && 
+                      candles[i-2].h > candles[i-3].h && 
+                      candles[i-2].h > candles[i-1].h && 
+                      candles[i-2].h > candles[i].h;
 
       const rsi_call_ok = (rsi_val >= 55 || rsi_val >= 30) && rsi_subindo;
       const rsi_put_ok = (rsi_val <= 45 || rsi_val <= 70) && rsi_caindo;
 
       let sinalStr = "";
-      // Condição: Fractal + RSI Ok + Vela anterior confirma cor
       if (f_alta && rsi_call_ok && candles[i-1].c > candles[i-1].o) sinalStr = "ACIMA";
       if (f_baixa && rsi_put_ok && candles[i-1].c < candles[i-1].o) sinalStr = "ABAIXO";
 
-      const inicioVelaSinal = candles[i].t; 
-      const opId = `${ativo.label}_${inicioVelaSinal}`;
+      const opId = `${ativo.label}_${candles[i].t}`;
 
-      // ENVIO DE SINAL (Janela de 3 minutos para garantir entrega)
-      if (sinalStr && minutoNaVela <= 3 && !lastSinais[opId]) {
-        const dataVela = new Date(inicioVelaSinal * 1000);
-        const hVela = dataVela.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
+      // Envio apenas nos primeiros 2 minutos da vela de execução
+      if (sinalStr && minutoNaVela <= 2 && !lastSinais[opId]) {
+        const hVela = new Date(candles[i].t * 1000).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
         
-        lastSinais[opId] = { tipo: sinalStr, precoEntrada: candles[i-1].c, mtgEnviado: false, hSinal: hVela };
+        lastSinais[opId] = true;
         
         const emoji = sinalStr === "ACIMA" ? "🟢" : "🔴";
         const seta = sinalStr === "ACIMA" ? "↑" : "↓";
@@ -117,30 +127,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           body: JSON.stringify({ chat_id, text: msg, parse_mode: 'HTML' }) 
         });
       }
-
-      // --- ALERTA DE MARTINGALE ---
-      const context = lastSinais[opId];
-      if (context && !context.mtgEnviado && minutoNaVela >= 3 && minutoNaVela <= 9) {
-        const pAtual = candles[i].c;
-        const loss = (context.tipo === "ACIMA" && pAtual < context.precoEntrada) || (context.tipo === "ABAIXO" && pAtual > context.precoEntrada);
-
-        if (loss) {
-          context.mtgEnviado = true;
-          const setaMtg = context.tipo === "ACIMA" ? "↑" : "↓";
-          const horarioCompra = 10 - minutoNaVela; 
-
-          const msgMtg = `⚠️ <b>ALERTA DE MARTINGALE</b>\n<b>Sinal:</b> ${setaMtg} ${context.tipo}\n<b>Ativo:</b> ${ativo.label}\n<b>Vela:</b> ${context.hSinal}\n<b>Horário de Compra:</b> ${horarioCompra} min`;
-          
-          await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { 
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify({ chat_id, text: msgMtg, parse_mode: 'HTML' }) 
-          });
-        }
-      }
     }
 
-    // --- HTML ORIGINAL APROVADO ---
-    const isForexOpen = getStatus("EURUSD"); 
+    // --- HTML ORIGINAL ---
+    const isForexOpen = getStatus("EURUSD");
     const statusForex = isForexOpen ? "ABERTO" : "FECHADO";
     const bgForex = isForexOpen ? "rgba(0,255,136,0.15)" : "rgba(255,68,68,0.15)";
     const colorForex = isForexOpen ? "var(--primary)" : "#ff4444";
@@ -182,7 +172,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             <div class="asset-card"><span>BTCUSD</span><span class="status-pill" style="background:rgba(0,255,136,0.15); color:var(--primary)">ABERTO</span></div> 
             <div class="asset-card"><span>EURUSD</span><span class="status-pill" style="background:${bgForex}; color:${colorForex}">${statusForex}</span></div> 
             <div class="asset-card"><span>GBPUSD</span><span class="status-pill" style="background:${bgForex}; color:${colorForex}">${statusForex}</span></div> 
-            <div class="asset-card"><span>USDJPY</span><span class="status-pill" style="background:${bgForex === "rgba(255,68,68,0.15)" ? "rgba(255,68,68,0.15)" : "rgba(0,255,136,0.15)"}; color:${colorForex}"> ${getStatus("USDJPY") ? "ABERTO" : "FECHADO"}</span></div> 
+            <div class="asset-card"><span>USDJPY</span><span class="status-pill" style="background:${bgForex}; color:${colorForex}">${statusForex}</span></div> 
           </div> 
           <div class="footer"> 
             <div><b>DATA</b><p>${dataHora.split(',')[0]}</p></div> 
@@ -193,7 +183,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           <table class="revision-table"> 
             <thead> <tr><th>Nº</th><th>DATA</th><th>HORA</th><th>MOTIVO</th></tr> </thead> 
             <tbody> 
-              <tr><td>48</td><td>12/02/26</td><td>19:55</td><td>Fix Envio BTCUSD + RT_ROBO_V.01 Sync</td></tr>
+              <tr><td>49</td><td>12/02/26</td><td>20:05</td><td>Remoção Martingale + Sync Fractal Optnex</td></tr>
               <tr><td>37</td><td>08/02/26</td><td>23:10</td><td>Correção RSI Dinâmico + Janela 10min</td></tr>
             </tbody> 
           </table> 
