@@ -6,13 +6,14 @@ let lastSinais: Record<string, any> = {};
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const token = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = "7625668696";
-  const versao = "44"; 
+  const versao = "45"; 
   
   const agora = new Date();
   const dataHora = agora.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
   const minutosAtuais = agora.getMinutes();
   const minutoNaVela = minutosAtuais % 15;
-  // Janela de entrada: permitimos sinal apenas nos primeiros 2 minutos da vela nova (ex: 11:00 até 11:02)
+  
+  // Janela de entrada: permitimos sinal apenas nos primeiros 2 minutos da vela nova
   const dentroDaJanela = minutoNaVela <= 2; 
   
   const diaSemana = agora.getDay();
@@ -26,7 +27,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     { symbol: "USDJPY=X", label: "USDJPY", source: "yahoo", type: "forex" }
   ];
 
-  // RSI conforme Script Optex (Período 9)
   const calcularRSI = (dados: any[], idx: number) => {
     if (idx < 10) return 50;
     let gains = 0, losses = 0;
@@ -66,17 +66,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (candlesM15.length < 15) continue;
       
-      // i = Vela atual (em formação)
-      // i-1 = Vela que acabou de fechar (Sinal da Optex aparece aqui)
       const i = candlesM15.length - 1; 
 
-      // --- LÓGICA IGUAL AO SCRIPT OPTEX ---
+      // LÓGICA OPTEX
       const rsi_val = calcularRSI(candlesM15, i - 1);
       const rsi_ant = calcularRSI(candlesM15, i - 2);
       const rsi_subindo = rsi_val > rsi_ant;
       const rsi_caindo = rsi_val < rsi_ant;
 
-      // Fractal (Baseado na vela i-3 sendo o centro das 5 velas: i-5, i-4, i-3, i-2, i-1)
       const f_alta = candlesM15[i-3].l < candlesM15[i-5].l && candlesM15[i-3].l < candlesM15[i-4].l && candlesM15[i-3].l < candlesM15[i-2].l && candlesM15[i-3].l < candlesM15[i-1].l;
       const f_baixa = candlesM15[i-3].h > candlesM15[i-5].h && candlesM15[i-3].h > candlesM15[i-4].h && candlesM15[i-3].h > candlesM15[i-2].h && candlesM15[i-3].h > candlesM15[i-1].h;
 
@@ -87,29 +84,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (f_alta && rsi_call_ok && candlesM15[i-1].c > candlesM15[i-1].o) sinalStr = "ACIMA";
       if (f_baixa && rsi_put_ok && candlesM15[i-1].c < candlesM15[i-1].o) sinalStr = "ABAIXO";
 
-      if (sinalStr && dentroDaJanela) {
-        // ID único baseado no tempo exato da vela de abertura (ex: 11:00)
-        const tempoVelaInicio = candlesM15[i].t; 
-        const opId = `${ativo.label}_${tempoVelaInicio}`;
+      // --- CORREÇÃO DE TEMPO E DUPLICIDADE ---
+      // Calculamos o início da janela de 15 min (ex: 16:17 vira 16:15)
+      const dataVela = new Date(candlesM15[i].t * 1000);
+      const mArredondado = Math.floor(dataVela.getMinutes() / 15) * 15;
+      dataVela.setMinutes(mArredondado);
+      dataVela.setSeconds(0);
+      
+      const hVelaFormatada = dataVela.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
+      const opId = `${ativo.label}_${dataVela.getTime()}`;
 
-        if (!lastSinais[opId]) {
-          const hVela = new Date(tempoVelaInicio * 1000).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
-          lastSinais[opId] = { enviado: true, tipo: sinalStr, precoEntrada: candlesM15[i-1].c, mtgEnviado: false, hSinal: hVela };
-          
-          const emoji = sinalStr === "ACIMA" ? "🟢" : "🔴";
-          const seta = sinalStr === "ACIMA" ? "↑" : "↓";
-          const msgSinal = `${emoji} <b>SINAL EMITIDO!</b>\n<b>ATIVO:</b> ${ativo.label}\n<b>SINAL:</b> ${seta} ${sinalStr}\n<b>VELA:</b> ${hVela}`;
-          
-          await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { 
-            method: 'POST', 
-            headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify({ chat_id, text: msgSinal, parse_mode: 'HTML' }) 
-          });
-        }
+      if (sinalStr && dentroDaJanela && !lastSinais[opId]) {
+        lastSinais[opId] = { enviado: true, tipo: sinalStr, precoEntrada: candlesM15[i-1].c, mtgEnviado: false, hSinal: hVelaFormatada };
+        
+        const emoji = sinalStr === "ACIMA" ? "🟢" : "🔴";
+        const seta = sinalStr === "ACIMA" ? "↑" : "↓";
+        // Formato sem espaços extras conforme solicitado
+        const msgSinal = `${emoji} <b>SINAL EMITIDO!</b>\n<b>ATIVO:</b> ${ativo.label}\n<b>SINAL:</b> ${seta} ${sinalStr}\n<b>VELA:</b> ${hVelaFormatada}`;
+        
+        await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { 
+          method: 'POST', 
+          headers: { 'Content-Type': 'application/json' }, 
+          body: JSON.stringify({ chat_id, text: msgSinal, parse_mode: 'HTML' }) 
+        });
       }
 
       // MONITORAMENTO MARTINGALE
-      const context = lastSinais[`${ativo.label}_${candlesM15[i].t}`];
+      const context = lastSinais[opId];
       if (context && !context.mtgEnviado && minutoNaVela >= 13) {
         const urlM1 = ativo.source === "kucoin" 
           ? `https://api.kucoin.com/api/v1/market/candles?symbol=${ativo.symbol}&type=1min`
@@ -137,7 +138,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    // --- HTML ORIGINAL APROVADO ---
+    // --- HTML APROVADO ---
     const statusForex = isForexOpen ? "ABERTO" : "FECHADO";
     const bgForex = isForexOpen ? "rgba(0,255,136,0.15)" : "rgba(255,68,68,0.15)";
     const colorForex = isForexOpen ? "var(--primary)" : "#ff4444";
@@ -190,9 +191,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           <table class="revision-table"> 
             <thead> <tr><th>Nº</th><th>DATA</th><th>HORA</th><th>MOTIVO</th></tr> </thead> 
             <tbody> 
+              <tr><td>45</td><td>12/02/26</td><td>16:35</td><td>Correção Horário M15 e Duplicidade</td></tr>
               <tr><td>44</td><td>12/02/26</td><td>15:45</td><td>Sincronia Optex RT_ROBO_V.01 + Zero Delay</td></tr>
               <tr><td>43</td><td>12/02/26</td><td>15:30</td><td>Sincronia Zero Delay + Martingale Global</td></tr>
-              <tr><td>42</td><td>09/02/26</td><td>12:20</td><td>Correção Sincronia Forex (Yahoo)</td></tr>
             </tbody> 
           </table> 
         </div> 
