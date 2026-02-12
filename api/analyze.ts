@@ -15,34 +15,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const minBR = agora.getMinutes();
   const horaFormatada = horaBR * 100 + minBR;
 
-  // --- FUNÇÕES DE STATUS DO MERCADO (OPENEX) ---
-  const getStatus = (label: string) => {
-    if (label === "BTCUSD") return true; // Crypto 24/7
+  // --- FUNÇÕES DE STATUS DO MERCADO CONFORME OPENEX ---
+  const getStatusAtivo = (label: string): boolean => {
+    if (label === "BTCUSD") return true; // Cripto 24/7
     
     if (label === "USDJPY") {
-      // Segunda a Sexta: 00:00 às 16:00 (Aberto)
-      // Fora disso ou FDS: Fechado
+      // SEGUNDA A SEXTA: 00:00 ÀS 16:00
       if (diaSemana >= 1 && diaSemana <= 5) {
         return horaFormatada <= 1600;
       }
-      return false;
+      return false; // Sábado e Domingo Fechado
     }
 
     if (label === "EURUSD" || label === "GBPUSD") {
-      // Segunda a Quinta: 00:00-18:00 E 22:00-23:59 (Aberto)
+      // SEGUNDA A QUINTA: 00:00-18:00 E 22:00-23:59
       if (diaSemana >= 1 && diaSemana <= 4) {
         return (horaFormatada <= 1800) || (horaFormatada >= 2200);
       }
-      // Sexta: 00:00 às 16:30 (Aberto)
+      // SEXTA: 00:00 ÀS 16:30
       if (diaSemana === 5) {
         return horaFormatada <= 1630;
       }
-      // Domingo: 22:00 às 23:59 (Aberto)
+      // DOMINGO: 22:00 AS 23:59
       if (diaSemana === 0) {
         return horaFormatada >= 2200;
       }
-      // Sábado: Fechado o dia todo
-      return false;
+      return false; // Sábado Fechado
     }
     return false;
   };
@@ -67,8 +65,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     for (const ativo of ATIVOS) {
-      const aberto = getStatus(ativo.label);
-      if (!aberto) continue; // Não processa sinais se o mercado estiver fechado
+      const aberto = getStatusAtivo(ativo.label);
+      if (!aberto) continue; // Pula análise se o mercado estiver fechado
 
       const cacheBuster = Date.now();
       const urlM15 = ativo.source === "kucoin" 
@@ -96,11 +94,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const i = candles.length - 1; 
       const minutoNaVela = minBR % 15;
 
-      // --- LÓGICA OPTEX (RT_ROBO_V.01) ---
+      // --- LÓGICA RT_ROBO_V.01 ---
       const rsi_val = calcularRSI(candles, i - 1);
       const rsi_ant = calcularRSI(candles, i - 2);
       
-      // Fractal de 5 períodos centrado em i-3 (Comparação com as 2 velas anteriores e 2 posteriores do centro)
       const f_alta = candles[i-3].l < candles[i-5].l && candles[i-3].l < candles[i-4].l && candles[i-3].l < candles[i-2].l && candles[i-3].l < candles[i-1].l;
       const f_baixa = candles[i-3].h > candles[i-5].h && candles[i-3].h > candles[i-4].h && candles[i-3].h > candles[i-2].h && candles[i-3].h > candles[i-1].h;
 
@@ -114,7 +111,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const inicioVelaSinal = candles[i].t; 
       const opId = `${ativo.label}_${inicioVelaSinal}`;
 
-      // --- EMISSÃO DO SINAL ---
+      // --- EMISSÃO DO SINAL (FORMATO APROVADO) ---
       if (sinalStr && minutoNaVela <= 2 && !lastSinais[opId]) {
         const dataVela = new Date(inicioVelaSinal * 1000);
         const hVela = dataVela.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
@@ -131,9 +128,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
       }
 
-      // --- ALERTA DE MARTINGALE ---
+      // --- ALERTA DE MARTINGALE (CÁLCULO DE TEMPO SOLICITADO) ---
       const context = lastSinais[opId];
-      if (context && !context.mtgEnviado && minutoNaVela >= 13) {
+      if (context && !context.mtgEnviado && minutoNaVela >= 3 && minutoNaVela <= 13) {
         const pAtual = candles[i].c;
         const lossCall = context.tipo === "ACIMA" && pAtual < context.precoEntrada;
         const lossPut = context.tipo === "ABAIXO" && pAtual > context.precoEntrada;
@@ -141,8 +138,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (lossCall || lossPut) {
           context.mtgEnviado = true;
           const setaMtg = context.tipo === "ACIMA" ? "↑" : "↓";
-          const hCompra = 15 - minutoNaVela; // Prazo máximo 10min menos tempo decorrido
-          const msgMtg = `⚠️ <b>ALERTA DE MARTINGALE</b>\n<b>Sinal:</b> ${setaMtg} ${context.tipo}\n<b>Ativo:</b> ${ativo.label}\n<b>Vela:</b> ${context.hSinal}\n<b>Horário de Compra:</b> ${hCompra} min`;
+          const tempoCompra = 10 - minutoNaVela; // Prazo máximo 10min - tempo transcorrido
+          
+          const msgMtg = `⚠️ <b>ALERTA DE MARTINGALE</b>\n<b>Sinal:</b> ${setaMtg} ${context.tipo}\n<b>Ativo:</b> ${ativo.label}\n<b>Vela:</b> ${context.hSinal}\n<b>Horário de Compra:</b> ${tempoCompra} min`;
           
           await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { 
             method: 'POST', headers: { 'Content-Type': 'application/json' }, 
@@ -152,11 +150,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    // --- HTML DE STATUS ---
-    const statusBTC = "ABERTO";
-    const stEUR = getStatus("EURUSD") ? "ABERTO" : "FECHADO";
-    const stGBP = getStatus("GBPUSD") ? "ABERTO" : "FECHADO";
-    const stJPY = getStatus("USDJPY") ? "ABERTO" : "FECHADO";
+    // --- VARIÁVEIS PARA O HTML APROVADO ---
+    const sBTC = "ABERTO";
+    const sEUR = getStatusAtivo("EURUSD") ? "ABERTO" : "FECHADO";
+    const sGBP = getStatusAtivo("GBPUSD") ? "ABERTO" : "FECHADO";
+    const sJPY = getStatusAtivo("USDJPY") ? "ABERTO" : "FECHADO";
 
     const getPillStyle = (s: string) => s === "ABERTO" 
       ? "background:rgba(0,255,136,0.15); color:#00ff88" 
@@ -197,10 +195,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           <h1>RICARDO SENTINELA BOT</h1> 
           <div class="status-badge"><div class="pulse-dot"></div> EM MONITORAMENTO...</div> 
           <div class="asset-grid"> 
-            <div class="asset-card"><span>BTCUSD</span><span class="status-pill" style="${getPillStyle(statusBTC)}">${statusBTC}</span></div> 
-            <div class="asset-card"><span>EURUSD</span><span class="status-pill" style="${getPillStyle(stEUR)}">${stEUR}</span></div> 
-            <div class="asset-card"><span>GBPUSD</span><span class="status-pill" style="${getPillStyle(stGBP)}">${stGBP}</span></div> 
-            <div class="asset-card"><span>USDJPY</span><span class="status-pill" style="${getPillStyle(stJPY)}">${stJPY}</span></div> 
+            <div class="asset-card"><span>BTCUSD</span><span class="status-pill" style="${getPillStyle(sBTC)}">${sBTC}</span></div> 
+            <div class="asset-card"><span>EURUSD</span><span class="status-pill" style="${getPillStyle(sEUR)}">${sEUR}</span></div> 
+            <div class="asset-card"><span>GBPUSD</span><span class="status-pill" style="${getPillStyle(sGBP)}">${sGBP}</span></div> 
+            <div class="asset-card"><span>USDJPY</span><span class="status-pill" style="${getPillStyle(sJPY)}">${sJPY}</span></div> 
           </div> 
           <div class="footer"> 
             <div><b>DATA</b><p>${dataHora.split(',')[0]}</p></div> 
@@ -211,7 +209,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           <table class="revision-table"> 
             <thead> <tr><th>Nº</th><th>DATA</th><th>HORA</th><th>MOTIVO</th></tr> </thead> 
             <tbody> 
-              <tr><td>47</td><td>12/02/26</td><td>19:05</td><td>Ajuste Horários Openex (EUR/GBP/JPY)</td></tr>
+              <tr><td>47</td><td>12/02/26</td><td>19:05</td><td>Ajuste Final Horários OpenEx Forex</td></tr>
               <tr><td>46</td><td>12/02/26</td><td>18:45</td><td>Novos Horários Forex + Fix Fractal</td></tr>
             </tbody> 
           </table> 
