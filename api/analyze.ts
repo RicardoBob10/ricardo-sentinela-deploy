@@ -6,7 +6,7 @@ let lastSinais: Record<string, boolean> = {};
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const token = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = "7625668696";
-  const versao = "49"; 
+  const versao = "50"; 
   
   const agora = new Date();
   const options: Intl.DateTimeFormatOptions = { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false };
@@ -16,7 +16,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const diaSemana = agora.getDay();
   const dataHora = agora.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 
-  // --- STATUS DO MERCADO ---
+  // --- STATUS DO MERCADO (REGRAS OPENEX) ---
   const getStatus = (label: string): boolean => {
     if (label === "BTCUSD") return true;
     if (label === "USDJPY") {
@@ -37,7 +37,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     { symbol: "USDJPY=X", label: "USDJPY", source: "yahoo" }
   ];
 
-  // RSI de 9 períodos (Conforme Script RT_ROBO_V.01)
   const calcularRSI = (dados: any[], idx: number) => {
     if (idx < 10) return 50;
     let gains = 0, losses = 0;
@@ -51,7 +50,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     for (const ativo of ATIVOS) {
-      if (!getStatus(ativo.label)) continue;
+      const isAberto = getStatus(ativo.label);
+      if (!isAberto) continue;
 
       const cacheBuster = Date.now();
       const urlM15 = ativo.source === "kucoin" 
@@ -76,28 +76,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (candles.length < 10) continue;
       
-      const i = candles.length - 1; // Vela atual (M15 rodando)
+      const i = candles.length - 1; // Vela atual em processamento
       const minutoNaVela = agora.getMinutes() % 15;
 
-      // --- LÓGICA SYNC RT_ROBO_V.01 ---
-      // No script Pine: low[2] < low[4] e low[3] e low[1] e low[0]
-      // No nosso código (quando i é a vela atual):
-      // A vela do sinal (central) é a candles[i-2]
-      // As anteriores são candles[i-4] e candles[i-3]
-      // As posteriores (confirmação) são candles[i-1] e candles[i]
+      // --- LÓGICA SYNC RT_ROBO_V.01 (FRACTAL 5 PERÍODOS) ---
+      // Para alinhar com o low[2] da plataforma:
+      // O ponto central do fractal é candles[i-2]
+      // Confirmação (as 2 posteriores) são candles[i-1] e candles[i]
       
       const rsi_val = calcularRSI(candles, i - 1);
       const rsi_ant = calcularRSI(candles, i - 2);
       const rsi_subindo = rsi_val > rsi_ant;
       const rsi_caindo = rsi_val < rsi_ant;
 
-      // Fractal de Alta (Gatilho para ACIMA)
+      // Fractal de Alta (Gatilho para ACIMA): mínima de i-2 menor que i-4, i-3, i-1 e i
       const f_alta = candles[i-2].l < candles[i-4].l && 
                      candles[i-2].l < candles[i-3].l && 
                      candles[i-2].l < candles[i-1].l && 
                      candles[i-2].l < candles[i].l;
 
-      // Fractal de Baixa (Gatilho para ABAIXO)
+      // Fractal de Baixa (Gatilho para ABAIXO): máxima de i-2 maior que i-4, i-3, i-1 e i
       const f_baixa = candles[i-2].h > candles[i-4].h && 
                       candles[i-2].h > candles[i-3].h && 
                       candles[i-2].h > candles[i-1].h && 
@@ -107,14 +105,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const rsi_put_ok = (rsi_val <= 45 || rsi_val <= 70) && rsi_caindo;
 
       let sinalStr = "";
+      // Validação da cor da vela de confirmação (i-1) conforme script
       if (f_alta && rsi_call_ok && candles[i-1].c > candles[i-1].o) sinalStr = "ACIMA";
       if (f_baixa && rsi_put_ok && candles[i-1].c < candles[i-1].o) sinalStr = "ABAIXO";
 
       const opId = `${ativo.label}_${candles[i].t}`;
 
-      // Envio apenas nos primeiros 2 minutos da vela de execução
+      // Envio nos primeiros minutos da vela de 15min para garantir sincronia
       if (sinalStr && minutoNaVela <= 2 && !lastSinais[opId]) {
-        const hVela = new Date(candles[i].t * 1000).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
+        const dataVela = new Date(candles[i].t * 1000);
+        const hVela = dataVela.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
         
         lastSinais[opId] = true;
         
@@ -129,7 +129,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    // --- HTML ORIGINAL ---
+    // --- CONFIGURAÇÃO HTML ---
     const isForexOpen = getStatus("EURUSD");
     const statusForex = isForexOpen ? "ABERTO" : "FECHADO";
     const bgForex = isForexOpen ? "rgba(0,255,136,0.15)" : "rgba(255,68,68,0.15)";
@@ -183,8 +183,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           <table class="revision-table"> 
             <thead> <tr><th>Nº</th><th>DATA</th><th>HORA</th><th>MOTIVO</th></tr> </thead> 
             <tbody> 
+              <tr><td>50</td><td>12/02/26</td><td>20:30</td><td>Sync Fractal i-2 + Histórico 5v</td></tr>
               <tr><td>49</td><td>12/02/26</td><td>20:05</td><td>Remoção Martingale + Sync Fractal Optnex</td></tr>
+              <tr><td>48</td><td>12/02/26</td><td>19:55</td><td>Fix Envio BTCUSD + RT_ROBO_V.01 Sync</td></tr>
               <tr><td>37</td><td>08/02/26</td><td>23:10</td><td>Correção RSI Dinâmico + Janela 10min</td></tr>
+              <tr><td>36</td><td>08/02/26</td><td>22:30</td><td>IA Martingale + Monitoramento M1 (V36)</td></tr>
             </tbody> 
           </table> 
         </div> 
