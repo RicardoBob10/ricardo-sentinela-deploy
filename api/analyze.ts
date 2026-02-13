@@ -7,27 +7,29 @@ let lastSinais: Record<string, boolean> = {};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
 
-  const token = "SEU_TOKEN";
+  const token   = "SEU_TOKEN";
   const chat_id = "SEU_CHAT_ID";
-  const versao = "68";
+  const versao  = "68";
 
   const agora = new Date();
   const timeZone = 'America/Sao_Paulo';
 
-  const options: Intl.DateTimeFormatOptions = {
+  // ===============================
+  // DATA / HORA
+  // ===============================
+  const dataBR = agora.toLocaleDateString('pt-BR');
+  const horaBR = agora.toLocaleTimeString('pt-BR', {
     timeZone,
     hour: '2-digit',
-    minute: '2-digit',
-    hour12: false
-  };
+    minute: '2-digit'
+  });
 
-  const horaBR = agora.toLocaleTimeString('pt-BR', options);
   const [h, m] = horaBR.split(':').map(Number);
   const horaNum = h * 100 + m;
   const diaSemana = agora.getDay();
 
   // ===============================
-  // STATUS MERCADO EURUSD
+  // STATUS MERCADO
   // ===============================
   const getStatus = (label: string) => {
 
@@ -35,9 +37,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (label === "EURUSD") {
 
-      if (diaSemana >= 1 && diaSemana <= 4) {
+      if (diaSemana >= 1 && diaSemana <= 4)
         return (horaNum <= 1800) || (horaNum >= 2200);
-      }
 
       if (diaSemana === 5) return horaNum <= 1630;
       if (diaSemana === 0) return horaNum >= 2200;
@@ -50,6 +51,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     { symbol: "BTC-USDT", label: "BTCUSD", source: "kucoin" },
     { symbol: "EURUSD=X", label: "EURUSD", source: "yahoo" }
   ];
+
+  let sinais: any = {
+    EURUSD: "AGUARDAR"
+  };
 
   // ===============================
   // RSI
@@ -71,15 +76,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return 100 - (100 / (1 + rs));
   };
 
+  // ===============================
+  // LOOP ATIVOS
+  // ===============================
   try {
 
     for (const ativo of ATIVOS) {
 
       if (!getStatus(ativo.label)) continue;
 
-      // ===============================
-      // FETCH
-      // ===============================
       const url = ativo.source === "kucoin"
         ? `https://api.kucoin.com/api/v1/market/candles?symbol=${ativo.symbol}&type=15min`
         : `https://query1.finance.yahoo.com/v8/finance/chart/${ativo.symbol}?interval=15m&range=1d`;
@@ -105,7 +110,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const q = r.indicators.quote[0];
 
         candles = r.timestamp.map((t: any, i: number) => ({
-          t: t * 1000, // ✔️ NORMALIZAÇÃO TIMESTAMP
+          t: t * 1000,
           o: q.open[i],
           c: q.close[i],
           h: q.high[i],
@@ -115,9 +120,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (candles.length < 10) continue;
 
-      // ===============================
-      // SINCRONIA RT_ROBO_V.01
-      // ===============================
       const i = candles.length - 1;
 
       const rsi_val = calcularRSI(candles, i);
@@ -136,62 +138,122 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         candles[i-2].h > candles[i].h;
 
       const rsi_subindo = rsi_val > rsi_ant;
-      const rsi_caindo = rsi_val < rsi_ant;
-
-      const rsi_call_ok = (rsi_val >= 55 || rsi_val >= 30) && rsi_subindo;
-      const rsi_put_ok  = (rsi_val <= 45 || rsi_val <= 70) && rsi_caindo;
+      const rsi_caindo  = rsi_val < rsi_ant;
 
       let sinal = "";
 
-      if (f_alta && rsi_call_ok && candles[i].c > candles[i].o)
-        sinal = "ACIMA";
+      if (f_alta && rsi_subindo && candles[i].c > candles[i].o)
+        sinal = "CALL";
 
-      if (f_baixa && rsi_put_ok && candles[i].c < candles[i].o)
-        sinal = "ABAIXO";
+      if (f_baixa && rsi_caindo && candles[i].c < candles[i].o)
+        sinal = "PUT";
 
       if (!sinal) continue;
 
-      // ===============================
-      // ID ÚNICO ANTI DUPLICAÇÃO
-      // ===============================
-      const opId = `${ativo.label}_${candles[i].t}`;
+      sinais[ativo.label] = sinal;
 
+      const opId = `${ativo.label}_${candles[i].t}`;
       if (lastSinais[opId]) continue;
       lastSinais[opId] = true;
 
-      // ===============================
-      // HORA DA VELA = TELEGRAM
-      // ===============================
-      const hVela = new Date(candles[i].t)
-        .toLocaleTimeString('pt-BR', {
-          timeZone,
-          hour: '2-digit',
-          minute: '2-digit'
-        });
-
-      const emoji = sinal === "ACIMA" ? "🟢" : "🔴";
-      const seta  = sinal === "ACIMA" ? "↑" : "↓";
-
       const msg =
-`${emoji} <b>SINAL EMITIDO!</b>
-<b>ATIVO:</b> ${ativo.label}
-<b>SINAL:</b> ${seta} ${sinal}
-<b>VELA:</b> ${hVela}`;
+`🚨 SINAL V${versao}
+
+ATIVO: ${ativo.label}
+SINAL: ${sinal}
+HORA: ${horaBR}`;
 
       await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           chat_id,
-          text: msg,
-          parse_mode: "HTML"
+          text: msg
         })
       });
     }
 
-    return res.status(200).send("V68 OK");
+  } catch {}
 
-  } catch {
-    return res.status(200).send("STANDBY");
-  }
+  // ===============================
+  // HTML PANEL
+  // ===============================
+  return res.status(200).send(`
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>RICARDO SENTINELA PRO v68</title>
+
+<style>
+body{
+background:#050505;
+color:#fff;
+font-family:Arial;
+display:flex;
+justify-content:center;
+align-items:center;
+height:100vh;
+margin:0;
+}
+.card{
+background:#111;
+padding:30px;
+border-radius:20px;
+width:380px;
+box-shadow:0 0 30px #000;
+}
+h1{text-align:center;color:#00ff88;}
+.asset{
+display:flex;
+justify-content:space-between;
+padding:10px;
+margin:6px 0;
+background:#1a1a1a;
+border-radius:8px;
+}
+.table{
+width:100%;
+font-size:10px;
+margin-top:20px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="card">
+
+<h1>SENTINELA v68</h1>
+
+<div class="asset">
+<span>BTCUSD</span>
+<span>ABERTO</span>
+</div>
+
+<div class="asset">
+<span>EURUSD</span>
+<span>${sinais.EURUSD}</span>
+</div>
+
+<hr>
+
+<div>DATA: ${dataBR}</div>
+<div>HORA: ${horaBR}</div>
+<div>STATUS: ATIVO</div>
+
+<table class="table">
+<tr><td>68</td><td>13/02</td><td>HTML + API</td></tr>
+<tr><td>61</td><td>13/02</td><td>Fix Yahoo</td></tr>
+<tr><td>51</td><td>12/02</td><td>Refino</td></tr>
+<tr><td>50</td><td>12/02</td><td>Sync</td></tr>
+<tr><td>49</td><td>12/02</td><td>Martingale OFF</td></tr>
+</table>
+
+</div>
+</body>
+</html>
+
+`);
 }
