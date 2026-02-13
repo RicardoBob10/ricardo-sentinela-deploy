@@ -24,6 +24,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     minute: '2-digit'
   });
 
+  const dataHora = `${dataBR},${horaBR}`;
+
   const [h, m] = horaBR.split(':').map(Number);
   const horaNum = h * 100 + m;
   const diaSemana = agora.getDay();
@@ -166,17 +168,27 @@ HORA: ${horaBR}`;
       await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id,
-          text: msg
-        })
+        body: JSON.stringify({ chat_id, text: msg })
       });
     }
 
   } catch {}
 
   // ===============================
-  // HTML PANEL
+  // STATUS VISUAL EURUSD
+  // ===============================
+  const statusEur = sinais.EURUSD;
+  const bgEur =
+    statusEur === "CALL" ? "rgba(0,255,136,0.15)" :
+    statusEur === "PUT"  ? "rgba(255,80,80,0.15)" :
+    "rgba(255,255,255,0.08)";
+
+  const colorEur =
+    statusEur === "PUT" ? "#ff5050" :
+    "#00ff88";
+
+  // ===============================
+  // HTML CYBER (O SEU)
   // ===============================
   return res.status(200).send(`
 
@@ -184,74 +196,128 @@ HORA: ${horaBR}`;
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>RICARDO SENTINELA PRO v68</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RICARDO SENTINELA PRO</title>
 
 <style>
-body{
-background:#050505;
-color:#fff;
-font-family:Arial;
-display:flex;
-justify-content:center;
-align-items:center;
-height:100vh;
-margin:0;
+:root {
+ --primary: #00ff88;
+ --bg: #050505;
 }
-.card{
-background:#111;
-padding:30px;
-border-radius:20px;
-width:380px;
-box-shadow:0 0 30px #000;
+
+body {
+ background-color: var(--bg);
+ background-image: radial-gradient(circle at 2px 2px, rgba(255,255,255,0.02) 1px, transparent 0);
+ background-size: 32px 32px;
+ color: #fff;
+ font-family: Inter, sans-serif;
+ display: flex;
+ justify-content: center;
+ align-items: center;
+ min-height: 100vh;
+ margin: 0;
 }
-h1{text-align:center;color:#00ff88;}
-.asset{
-display:flex;
-justify-content:space-between;
-padding:10px;
-margin:6px 0;
-background:#1a1a1a;
-border-radius:8px;
+
+.main-card {
+ width: 95%;
+ max-width: 420px;
+ background: rgba(17,17,17,0.85);
+ backdrop-filter: blur(20px);
+ border: 1px solid rgba(255,255,255,0.1);
+ border-radius: 32px;
+ padding: 30px 20px;
+ box-shadow: 0 25px 50px rgba(0,0,0,0.8);
 }
-.table{
-width:100%;
-font-size:10px;
-margin-top:20px;
+
+h1 {
+ font-size: 22px;
+ text-align: center;
+ margin-bottom: 20px;
+ font-weight: 900;
+ text-transform: uppercase;
+ color: #FFFFFF;
+ text-shadow: 0 0 10px rgba(0,255,136,0.5);
+}
+
+.status-badge {
+ display:flex;
+ justify-content:center;
+ gap:10px;
+ background:rgba(0,255,136,0.08);
+ border:1px solid rgba(0,255,136,0.2);
+ padding:10px;
+ border-radius:14px;
+ font-size:11px;
+ color:#00ff88;
+ margin-bottom:20px;
+}
+
+.asset-card{
+ background:rgba(255,255,255,0.03);
+ border:1px solid rgba(255,255,255,0.05);
+ padding:12px 15px;
+ border-radius:12px;
+ display:flex;
+ justify-content:space-between;
+ margin-bottom:8px;
+}
+
+.status-pill{
+ font-size:10px;
+ font-weight:800;
+ padding:6px 12px;
+ border-radius:6px;
+}
+
+.footer{
+ margin-top:25px;
+ padding-top:15px;
+ border-top:1px solid rgba(255,255,255,0.08);
+ display:grid;
+ grid-template-columns:1fr 1fr;
+ gap:15px;
+ text-align:center;
 }
 </style>
 </head>
 
 <body>
 
-<div class="card">
+<div class="main-card">
 
-<h1>SENTINELA v68</h1>
+<h1>RICARDO SENTINELA BOT</h1>
 
-<div class="asset">
+<div class="status-badge">EM MONITORAMENTO...</div>
+
+<div class="asset-card">
 <span>BTCUSD</span>
-<span>ABERTO</span>
+<span class="status-pill"
+style="background:rgba(0,255,136,0.15);color:#00ff88">
+ABERTO
+</span>
 </div>
 
-<div class="asset">
+<div class="asset-card">
 <span>EURUSD</span>
-<span>${sinais.EURUSD}</span>
+<span class="status-pill"
+style="background:${bgEur};color:${colorEur}">
+${statusEur}
+</span>
 </div>
 
-<hr>
-
-<div>DATA: ${dataBR}</div>
-<div>HORA: ${horaBR}</div>
-<div>STATUS: ATIVO</div>
-
-<table class="table">
-<tr><td>68</td><td>13/02</td><td>HTML + API</td></tr>
-<tr><td>61</td><td>13/02</td><td>Fix Yahoo</td></tr>
-<tr><td>51</td><td>12/02</td><td>Refino</td></tr>
-<tr><td>50</td><td>12/02</td><td>Sync</td></tr>
-<tr><td>49</td><td>12/02</td><td>Martingale OFF</td></tr>
-</table>
+<div class="footer">
+<div><b>DATA</b><p>${dataBR}</p></div>
+<div><b>HORA</b><p>${horaBR}</p></div>
+<div><b>VERSÃO</b><p style="color:#00ff88;font-weight:bold">${versao}</p></div>
+<div><b>STATUS</b><p style="color:#00ff88;font-weight:bold">ATIVO</p></div>
+</div>
 
 </div>
+
+<script>
+setTimeout(()=>location.reload(),20000);
+</script>
+
 </body>
 </html>
 
