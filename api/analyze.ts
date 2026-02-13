@@ -17,7 +17,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const getStatus = (label: string): boolean => {
     if (label === "BTCUSD") return true;
     // --- MODO DE TESTE ATIVADO PARA EURUSD ---
-    if (label === "EURUSD") return true; 
+    if (label === "EURUSD"); 
     return false;
   };
 
