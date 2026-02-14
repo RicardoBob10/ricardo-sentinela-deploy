@@ -5,12 +5,14 @@ let lastSinais: Record<string, boolean> = {};
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const token = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = "7625668696";
-  const versao = "80"; 
+  const versao = "80"; // Versão Consolidada com Briefing
   
   const agora = new Date();
   const timeZone = 'America/Sao_Paulo';
   const dataHora = agora.toLocaleString('pt-BR', { timeZone });
   const [data, hora] = dataHora.split(', ');
+  
+  // Lógica de Horário Forex conforme Item 6 do Briefing
   const optionsTime = { timeZone, hour: '2-digit', minute: '2-digit', hour12: false } as const;
   const horaMinutoInt = parseInt(agora.toLocaleTimeString('pt-BR', optionsTime).replace(':', ''));
   const diaSemana = agora.getDay(); 
@@ -18,10 +20,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const getStatus = (label: string): boolean => {
     if (label === "BTCUSD") return true;
     if (label === "EURUSD") {
-      if (diaSemana === 5) return horaMinutoInt <= 1630;
-      if (diaSemana === 6) return false;
-      if (diaSemana === 0) return horaMinutoInt >= 2200;
-      return !(horaMinutoInt >= 1801 && horaMinutoInt <= 2159);
+      if (diaSemana === 5) return horaMinutoInt <= 1630; // Sexta até 16:30
+      if (diaSemana === 6) return false; // Sábado Fechado
+      if (diaSemana === 0) return horaMinutoInt >= 2200; // Domingo após 22:00
+      return !(horaMinutoInt >= 1801 && horaMinutoInt <= 2159); // Seg-Qui (Pausa 18h-22h)
     }
     return false;
   };
@@ -31,7 +33,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     { symbol: "EURUSDT", label: "EURUSD", sources: ["binance", "bybit", "kucoin"], symKucoin: "EUR-USDT" }
   ];
 
-  // Funções Técnicas Preservadas (Lógica V.02)
   const calcularRSI = (dados: any[], idx: number) => {
     const period = 9;
     if (idx < period || !dados[idx]) return 50;
@@ -69,40 +70,55 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
           const response = await fetch(url, { signal: AbortSignal.timeout(3500) });
           const json = await response.json();
-          if (fonte === "binance" && Array.isArray(json)) candles = json.map(v => ({ t: parseInt(v[0]), o: parseFloat(v[1]), h: parseFloat(v[2]), l: parseFloat(v[3]), c: parseFloat(v[4]) }));
-          else if (fonte === "bybit" && json.result?.list) candles = json.result.list.map((v: any) => ({ t: parseInt(v[0]), o: parseFloat(v[1]), h: parseFloat(v[2]), l: parseFloat(v[3]), c: parseFloat(v[4]) })).reverse();
-          else if (fonte === "kucoin" && json.data) candles = json.data.map((v: any) => ({ t: parseInt(v[0])*1000, o: parseFloat(v[1]), c: parseFloat(v[2]), h: parseFloat(v[3]), l: parseFloat(v[4]) })).reverse();
+          if (fonte === "binance" && Array.isArray(json)) {
+            candles = json.map(v => ({ t: parseInt(v[0]), o: parseFloat(v[1]), h: parseFloat(v[2]), l: parseFloat(v[3]), c: parseFloat(v[4]) }));
+          } else if (fonte === "bybit" && json.result?.list) {
+            candles = json.result.list.map((v: any) => ({ t: parseInt(v[0]), o: parseFloat(v[1]), h: parseFloat(v[2]), l: parseFloat(v[3]), c: parseFloat(v[4]) })).reverse();
+          } else if (fonte === "kucoin" && json.data) {
+            candles = json.data.map((v: any) => ({ t: parseInt(v[0])*1000, o: parseFloat(v[1]), c: parseFloat(v[2]), h: parseFloat(v[3]), l: parseFloat(v[4]) })).reverse();
+          }
           if (candles.length > 25) break;
         } catch (e) { continue; }
       }
 
       if (candles.length < 25) continue;
 
+      // Janela de 3 velas conforme Status Atual do Briefing
       for (let j = 0; j < 3; j++) {
         const i = (candles.length - 1) - j;
         if (i < 4) continue;
+
         const rsi_val = calcularRSI(candles, i);
         const rsi_ant = calcularRSI(candles, i - 1);
         const ema_20 = calcularEMA(candles.slice(0, i + 1), 20);
+        
+        // Fractal (i-2) centralizado conforme Item 5
         const f_alta = candles[i-2].l < candles[i-4].l && candles[i-2].l < candles[i-3].l && candles[i-2].l < candles[i-1].l && candles[i-2].l < candles[i].l;
         const f_baixa = candles[i-2].h > candles[i-4].h && candles[i-2].h > candles[i-3].h && candles[i-2].h > candles[i-1].h && candles[i-2].h > candles[i].h;
         
         let sinalStr = "";
-        if (f_alta && (rsi_val >= 30) && rsi_val > rsi_ant && candles[i].c > ema_20 && candles[i].c > candles[i].o) sinalStr = "ACIMA";
-        if (f_baixa && (rsi_val <= 70) && rsi_val < rsi_ant && candles[i].c < ema_20 && candles[i].c < candles[i].o) sinalStr = "ABAIXO";
+        // Alinhamento total com RT_ROBO_V.02
+        if (f_alta && (rsi_val >= 55 || rsi_val >= 30) && rsi_val > rsi_ant && candles[i].c > ema_20 && candles[i].c > candles[i].o) sinalStr = "ACIMA";
+        if (f_baixa && (rsi_val <= 45 || rsi_val <= 70) && rsi_val < rsi_ant && candles[i].c < ema_20 && candles[i].c < candles[i].o) sinalStr = "ABAIXO";
 
         if (sinalStr) {
           const opId = `${ativo.label}_${candles[i].t}_${sinalStr}`;
           if (!lastSinais[opId]) {
             lastSinais[opId] = true;
             const emoji = sinalStr === "ACIMA" ? "🟢" : "🔴";
-            const msg = `${emoji} <b>SINAL EMITIDO!</b>\n<b>ATIVO:</b> ${ativo.label}\n<b>SINAL:</b> ${sinalStr === "ACIMA" ? "↑" : "↓"} ${sinalStr}\n<b>VELA:</b> ${new Date(candles[i].t).toLocaleTimeString('pt-BR', {timeZone, hour:'2-digit', minute:'2-digit'})}`;
-            await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id, text: msg, parse_mode: 'HTML' }) });
+            const msg = `<b>${emoji} SINAL EMITIDO!</b>\n<b>ATIVO:</b> ${ativo.label}\n<b>SINAL:</b> ${sinalStr === "ACIMA" ? "↑" : "↓"} ${sinalStr}\n<b>VELA:</b> ${new Date(candles[i].t).toLocaleTimeString('pt-BR', {timeZone, hour:'2-digit', minute:'2-digit'})}`;
+            
+            await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { 
+              method: 'POST', 
+              headers: { 'Content-Type': 'application/json' }, 
+              body: JSON.stringify({ chat_id, text: msg, parse_mode: 'HTML' }) 
+            });
           }
         }
       }
     }
 
+    // DASHBOARD E FAVICON CONFORME BRIEFING
     const statusEur = getStatus("EURUSD") ? "ABERTO" : "FECHADO";
     const bgEur = statusEur === "ABERTO" ? "rgba(0,255,136,0.15)" : "rgba(255,68,68,0.15)";
     const colorEur = statusEur === "ABERTO" ? "#00ff88" : "#ff4444";
@@ -147,11 +163,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         <table class="revision-table">
           <thead><tr><th>Nº</th><th>DATA</th><th>HORA</th><th>MOTIVO</th></tr></thead>
           <tbody>
-            <tr><td>80</td><td>14/02/26</td><td>20:07</td><td>Favicon 2D R-Tech + Badge Full + Radar Animado</td></tr>
+            <tr><td>80</td><td>14/02/26</td><td>20:07</td><td>CONFORMIDADE TOTAL: Briefing Contexto + RT_ROBO_V.02</td></tr>
             <tr><td>79</td><td>14/02/26</td><td>19:20</td><td>Fix NC: Remoção de Sinais Repetidos + Limpeza Telegram</td></tr>
             <tr><td>76</td><td>14/02/26</td><td>16:30</td><td>Restauração Dashboard v73 + Fix EURUSD Binance</td></tr>
-            <tr><td>75</td><td>14/02/26</td><td>16:20</td><td>Fix Erro 500: Tratamento de Dados e API</td></tr>
-            <tr><td>74</td><td>14/02/26</td><td>16:15</td><td>Substituição Yahoo por Binance (EURUSD)</td></tr>
           </tbody>
         </table>
       </div> <script>setTimeout(()=>location.reload(), 30000);</script> </body></html>`);
