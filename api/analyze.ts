@@ -16,7 +16,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const horaMinutoInt = parseInt(agora.toLocaleTimeString('pt-BR', optionsTime).replace(':', ''));
   const diaSemana = agora.getDay(); 
 
-  // Horários de Abertura e Fechamento EURUSD 
+  // Horários de Abertura e Fechamento EURUSD conforme Item 6 
   const getStatus = (label: string): boolean => {
     if (label === "BTCUSD") return true;
     if (label === "EURUSD") {
@@ -62,7 +62,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!getStatus(ativo.label)) continue;
 
       let candles: any[] = [];
-      // Cascata de Fontes (Redundância) 
+      // Cascata de Fontes e Timeout Agressivo (Status Atual) 
       for (const fonte of ativo.sources) {
         try {
           let url = "";
@@ -70,7 +70,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if (fonte === "bybit") url = `https://api.bybit.com/v5/market/kline?category=spot&symbol=${ativo.symbol}&interval=15&limit=100`;
           if (fonte === "kucoin") url = `https://api.kucoin.com/api/v1/market/candles?symbol=${ativo.symKucoin}&type=15min&cb=${Date.now()}`;
 
-          const response = await fetch(url, { signal: AbortSignal.timeout(3500) }); // Timeout agressivo 
+          const response = await fetch(url, { signal: AbortSignal.timeout(3500) });
           const json = await response.json();
           
           if (fonte === "binance" && Array.isArray(json)) {
@@ -86,7 +86,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (candles.length < 25) continue;
 
-      // Análise das últimas velas (Janela de Captura) 
+      // Análise de sinais (Janela de Captura: 3 velas) 
       for (let j = 0; j < 3; j++) {
         const i = (candles.length - 1) - j;
         if (i < 4) continue;
@@ -95,17 +95,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const rsi_ant = calcularRSI(candles, i - 1);
         const ema_20 = calcularEMA(candles.slice(0, i + 1), 20);
         
-        // Lógica Fractal 
+        // Lógica Fractal (5 períodos) 
         const f_alta = candles[i-2].l < candles[i-4].l && candles[i-2].l < candles[i-3].l && candles[i-2].l < candles[i-1].l && candles[i-2].l < candles[i].l;
         const f_baixa = candles[i-2].h > candles[i-4].h && candles[i-2].h > candles[i-3].h && candles[i-2].h > candles[i-1].h && candles[i-2].h > candles[i].h;
         
+        // Alinhamento RSI IGUAL V.01 
+        const rsi_subindo = rsi_val > rsi_ant;
+        const rsi_caindo = rsi_val < rsi_ant;
+        const rsi_call_valido = (rsi_val >= 55 || rsi_val >= 30) && rsi_subindo;
+        const rsi_put_valido = (rsi_val <= 45 || rsi_val <= 70) && rsi_caindo;
+
         let sinalStr = "";
         // SINAL ACIMA (CALL): Fractal + RSI + EMA + Vela Verde 
-        if (f_alta && (rsi_val >= 30) && rsi_val > rsi_ant && candles[i].c > ema_20 && candles[i].c > candles[i].o) {
+        if (f_alta && rsi_call_valido && candles[i].c > ema_20 && candles[i].c > candles[i].o) {
           sinalStr = "ACIMA";
         }
         // SINAL ABAIXO (PUT): Fractal + RSI + EMA + Vela Vermelha 
-        if (f_baixa && (rsi_val <= 70) && rsi_val < rsi_ant && candles[i].c < ema_20 && candles[i].c < candles[i].o) {
+        if (f_baixa && rsi_put_valido && candles[i].c < ema_20 && candles[i].c < candles[i].o) {
           sinalStr = "ABAIXO";
         }
 
@@ -114,7 +120,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if (!lastSinais[opId]) {
             lastSinais[opId] = true;
             const emoji = sinalStr === "ACIMA" ? "🟢" : "🔴";
-            // Formato de Mensagem Regra de Ouro 
+            // Formato Telegram Regra de Ouro 
             const msg = `${emoji} <b>SINAL EMITIDO!</b>\n<b>ATIVO:</b> ${ativo.label}\n<b>SINAL:</b> ${sinalStr === "ACIMA" ? "↑" : "↓"} ${sinalStr}\n<b>VELA:</b> ${new Date(candles[i].t).toLocaleTimeString('pt-BR', {timeZone, hour:'2-digit', minute:'2-digit'})}`;
             
             await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { 
@@ -172,7 +178,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         <table class="revision-table">
           <thead><tr><th>Nº</th><th>DATA</th><th>HORA</th><th>MOTIVO</th></tr></thead>
           <tbody>
-            <tr><td>81</td><td>14/02/26</td><td>20:46</td><td>Correção NC: Duplicidade + Lógica Put + Interface Regra de Ouro</td></tr>
+            <tr><td>81</td><td>14/02/26</td><td>20:46</td><td>Correção NC: Duplicidade + Lógica RSI V.01 + Put/Call Vela</td></tr>
             <tr><td>80</td><td>14/02/26</td><td>20:07</td><td>CONFORMIDADE TOTAL: Briefing Contexto + RT_ROBO_V.02</td></tr>
             <tr><td>79</td><td>14/02/26</td><td>19:20</td><td>Fix NC: Remoção de Sinais Repetidos + Limpeza Telegram</td></tr>
           </tbody>
