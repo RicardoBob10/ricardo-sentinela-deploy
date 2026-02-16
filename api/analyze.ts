@@ -1,13 +1,13 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 
-// Cache para controle de sinais e acompanhamento de reversão
+// Cache global para evitar reincidência de sinais na mesma vela
 let lastSinais: Record<string, any> = {};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // CONFIGURAÇÕES DE VERSÃO E REVISÃO
-  const versao = "89";
+  // ATUALIZAÇÃO PARA VERSÃO 90 - FOCO EM ELIMINAR NCs REINCIDENTES
+  const versao = "90";
   const dataRevisao = "16/02/2026";
-  const horaRevisao = "18:05";
+  const horaRevisao = "18:20"; 
   
   const token = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = "7625668696";
@@ -18,7 +18,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const horaMinutoInt = parseInt(horaAtualHHMM.replace(':', ''));
   const diaSemana = agora.getDay(); 
 
-  // 1. REGRA DE HORÁRIOS FOREX (ITEM 6) 
   const isEurOpen = (): boolean => {
     if (diaSemana >= 1 && diaSemana <= 4) return true;
     if (diaSemana === 5) return horaMinutoInt <= 1900;
@@ -35,7 +34,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     for (const ativo of ativos) {
       if (!ativo.operando) continue;
 
-      const resApi = await fetch(`https://api.binance.com/api/v3/klines?symbol=${ativo.symbol}&interval=15m&limit=50`);
+      const resApi = await fetch(`https://api.binance.com/api/v3/klines?symbol=${ativo.symbol}&interval=15m&limit=100`);
       const candles = await resApi.json();
       if (!Array.isArray(candles)) continue;
 
@@ -44,7 +43,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const precoAtual = dados[i].c;
       const tempoVela = new Date(dados[i].t).toLocaleTimeString('pt-BR', optionsTime);
 
-      // LÓGICA TÉCNICA RT_ROBO_SCALPER_V3 (ITEM 5) 
       const calcEMA = (d: any[], p: number) => {
         const k = 2 / (p + 1);
         let ema = d[0].c;
@@ -55,29 +53,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const m9 = calcEMA(dados, 9);
       const m21 = calcEMA(dados, 21);
       
-      // Cálculo do RSI 14 real para cumprir a trava do indicador 
-      const gains = [], losses = [];
+      // Cálculo Preciso RSI 14 (Ação Corretiva NC 90-2)
+      let gains = 0, losses = 0;
       for (let j = i - 14; j < i; j++) {
-        const diff = dados[j+1].c - dados[j].c;
-        diff >= 0 ? gains.push(diff) : losses.push(Math.abs(diff));
+        const diff = dados[j + 1].c - dados[j].c;
+        diff >= 0 ? gains += diff : losses += Math.abs(diff);
       }
-      const avgGain = gains.reduce((a, b) => a + b, 0) / 14;
-      const avgLoss = losses.reduce((a, b) => a + b, 0) / 14;
-      const rsi14 = avgLoss === 0 ? 100 : 100 - (100 / (1 + (avgGain / avgLoss)));
+      const rs = gains / (losses || 1);
+      const rsi14 = 100 - (100 / (1 + rs));
 
-      // GATILHOS DE CRUZAMENTO + RSI 
       const sinalCall = m9 > m21 && rsi14 > 50;
       const sinalPut = m9 < m21 && rsi14 < 50;
 
-      // Suporte e Resistência para TP/SL 
       const resis = Math.max(...dados.slice(i-20).map(d => d.h));
       const sup = Math.min(...dados.slice(i-20).map(d => d.l));
 
-      // 4.1. FORMATO DE MENSAGENS DE COMPRA OU VENDA (ITEM 7.1) 
+      // 7.1 FORMATO DE MENSAGENS DE COMPRA OU VENDA (RIGOR TOTAL)
       if (sinalCall || sinalPut) {
-        const opId = `${ativo.label}_entrada`;
+        const opId = `${ativo.label}_${tempoVela}`; // ID único por vela para evitar falha de envio
         if (!lastSinais[opId]) {
-          lastSinais[opId] = { hora: tempoVela, direcao: sinalCall ? 'alta' : 'baixa' };
+          lastSinais[opId] = { hora: tempoVela, direcao: sinalCall ? 'alta' : 'baixa', ativo: ativo.label };
           const circulo = sinalCall ? "🟢" : "🔴";
           const seta = sinalCall ? "↑ COMPRAR" : "↓ VENDER";
           
@@ -97,9 +92,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
 
-      // 4.2. FORMATO DE MENSAGENS DE AVISO DE REVERSÃO (ITEM 7.2) 
-      const opAtiva = lastSinais[`${ativo.label}_entrada`];
-      if (opAtiva) {
+      // 7.2 FORMATO DE MENSAGENS DE AVISO DE REVERSÃO
+      const opAtivaId = Object.keys(lastSinais).find(key => key.startsWith(ativo.label));
+      if (opAtivaId) {
+        const opAtiva = lastSinais[opAtivaId];
         const reversaoAlta = opAtiva.direcao === 'baixa' && m9 > m21;
         const reversaoBaixa = opAtiva.direcao === 'alta' && m9 < m21;
 
@@ -116,13 +112,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ chat_id, text: msg72, parse_mode: 'HTML' })
           });
-          delete lastSinais[`${ativo.label}_entrada`];
+          delete lastSinais[opAtivaId];
         }
       }
     }
-  } catch (e) { console.error("Erro na execução."); }
+  } catch (e) { console.error("Erro."); }
 
-  // 3. INTERFACE HTML - REGRA DE OURO (ITEM 4) 
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   return res.status(200).send(`
     <!DOCTYPE html>
@@ -132,11 +127,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     <body>
       <div>_________________________________________________________________</div>
       <p><b>RICARDO SENTINELA BOT</b></p>
+      <p>&nbsp;</p>
       <p><b>STATUS:</b> <span class="verde">ATIVADO</span></p>
+      <p>&nbsp;</p>
       <p><b>VERSÃO ATUAL:</b> ${versao}</p>
       <p><b>DATA DA REVISÃO:</b> ${dataRevisao}</p>
       <p><b>HORA DA REVISÃO:</b> ${horaRevisao}</p>
       <div>_________________________________________________________________</div>
+      <script>setTimeout(() => location.reload(), 30000);</script>
     </body>
     </html>
   `);
