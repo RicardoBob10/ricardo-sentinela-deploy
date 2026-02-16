@@ -1,11 +1,12 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 
+// Cache para controle de sinais e acompanhamento de reversão
 let lastSinais: Record<string, any> = {};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const versao = "91";
   const dataRevisao = "16/02/2026";
-  const horaRevisao = "18:25"; 
+  const horaRevisao = "18:30"; 
   
   const token = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = "7625668696";
@@ -16,48 +17,45 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const horaMinutoInt = parseInt(horaAtualHHMM.replace(':', ''));
   const diaSemana = agora.getDay(); 
 
-  const isEurOpen = (): boolean => {
-    if (diaSemana >= 1 && diaSemana <= 4) return true;
-    if (diaSemana === 5) return horaMinutoInt <= 1900;
-    if (diaSemana === 0) return horaMinutoInt >= 1901;
-    return false;
+  // REGRA DE HORÁRIOS FOREX (ITEM 6)
+  const getMercadoStatus = () => {
+    if (diaSemana >= 1 && diaSemana <= 4) return "ABERTO";
+    if (diaSemana === 5) return horaMinutoInt <= 1900 ? "ABERTO" : "FECHADO";
+    if (diaSemana === 0) return horaMinutoInt >= 1901 ? "ABERTO" : "FECHADO";
+    return "FECHADO";
   };
+  const mercadoStatus = getMercadoStatus();
 
-  // FUNÇÃO DE CASCATA DE APIs (BINANCE > BYBIT > KUCOIN)
+  // FUNÇÃO DE CASCATA DE APIs (BINANCE > BYBIT > KUCOIN) - AÇÃO CORRETIVA NC 89-1/2
   async function fetchCandles(symbol: string) {
-    // 1. TENTA BINANCE
     try {
       const r = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=15m&limit=100`);
       if (r.ok) return await r.json();
-    } catch (e) { console.warn("Binance Offline, tentando Bybit..."); }
+    } catch (e) { console.warn("Binance Offline..."); }
 
-    // 2. TENTA BYBIT (1º BACKUP)
     try {
       const r = await fetch(`https://api.bybit.com/v5/market/kline?category=spot&symbol=${symbol}&interval=15&limit=100`);
       const j = await r.json();
       if (j.result?.list) return j.result.list.map((v: any) => [v[0], v[1], v[2], v[3], v[4]]);
-    } catch (e) { console.warn("Bybit Offline, tentando Kucoin..."); }
+    } catch (e) { console.warn("Bybit Offline..."); }
 
-    // 3. TENTA KUCOIN (2º BACKUP)
     try {
       const r = await fetch(`https://api.kucoin.com/api/v1/market/candles?symbol=${symbol.replace('USDT', '-USDT')}&type=15min`);
       const j = await r.json();
       if (j.data) return j.data;
-    } catch (e) { throw new Error("Todas as APIs falharam."); }
+    } catch (e) { throw new Error("Falha total nas APIs."); }
   }
 
   try {
     const ativos = [
       { symbol: "BTCUSDT", label: "Bitcoin", prec: 2, operando: true },
-      { symbol: "EURUSDT", label: "EURUSD", prec: 5, operando: isEurOpen() }
+      { symbol: "EURUSDT", label: "EURUSD", prec: 5, operando: mercadoStatus === "ABERTO" }
     ];
 
     for (const ativo of ativos) {
       if (!ativo.operando) continue;
 
       const candles = await fetchCandles(ativo.symbol);
-      if (!candles) continue;
-
       const dados = candles.map((v: any) => ({ t: v[0], c: parseFloat(v[4]), h: parseFloat(v[2]), l: parseFloat(v[3]) }));
       const i = dados.length - 1;
       const precoAtual = dados[i].c;
@@ -85,12 +83,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const resis = Math.max(...dados.slice(i-20).map(d => d.h));
       const sup = Math.min(...dados.slice(i-20).map(d => d.l));
 
+      // 7.1 FORMATO DE MENSAGENS DE COMPRA OU VENDA (REGRA DE OURO)
       if (sinalCall || sinalPut) {
         const opId = `${ativo.label}_${tempoVela}`;
         if (!lastSinais[opId]) {
           lastSinais[opId] = { hora: tempoVela, direcao: sinalCall ? 'alta' : 'baixa' };
-          const circ = sinalCall ? "🟢" : "🔴";
-          const msg71 = `${circ} <b>SINAL EMITIDO!</b>\n` +
+          const circulo = sinalCall ? "🟢" : "🔴";
+          const msg71 = `<b>${circulo} SINAL EMITIDO!</b>\n` +
                         `<b>ATIVO:</b> ${ativo.label}\n` +
                         `<b>SINAL:</b> ${sinalCall ? '↑ COMPRAR' : '↓ VENDER'}\n` +
                         `<b>VELA:</b> ${tempoVela}\n` +
@@ -106,11 +105,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
 
+      // 7.2 FORMATO DE MENSAGENS DE AVISO DE REVERSÃO
       const opAtivaId = Object.keys(lastSinais).find(key => key.startsWith(ativo.label));
       if (opAtivaId) {
         const opAtiva = lastSinais[opAtivaId];
         if ((opAtiva.direcao === 'baixa' && m9 > m21) || (opAtiva.direcao === 'alta' && m9 < m21)) {
-          const msg72 = `⚠️ <b>AVISO DE REVERSÃO</b>\n\n` +
+          const msg72 = `<b>⚠️AVISO DE REVERSÃO</b>\n\n` +
                         `<b>STATUS:</b> <b>TAKE PROFIT!</b>\n` +
                         `<b>ATIVO:</b> ${ativo.label}\n` +
                         `<b>VELA ANTERIOR:</b> ${opAtiva.hora}\n` +
@@ -126,7 +126,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
     }
-  } catch (e) { console.error("Erro crítico nas APIs."); }
+  } catch (e) { console.error("Erro técnico."); }
 
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   return res.status(200).send(`
@@ -143,6 +143,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       <p><b>VERSÃO ATUAL:</b> ${versao}</p>
       <p><b>DATA DA REVISÃO:</b> ${dataRevisao}</p>
       <p><b>HORA DA REVISÃO:</b> ${horaRevisao}</p>
+      <p><b>MERCADO EURUSD:</b> <b>${mercadoStatus}</b></p>
       <div>_________________________________________________________________</div>
       <script>setTimeout(() => location.reload(), 30000);</script>
     </body>
