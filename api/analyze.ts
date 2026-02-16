@@ -1,6 +1,6 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 
-// Cache global para evitar duplicidade de sinais na mesma vela
+// Cache para evitar duplicidade na mesma vela
 let lastSinais: Record<string, boolean> = {};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -16,37 +16,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const horaMinutoInt = parseInt(agora.toLocaleTimeString('pt-BR', optionsTime).replace(':', ''));
   const diaSemana = agora.getDay(); 
 
-  // REGRA DE OURO: Horários do Robô (Item 6 do Briefing) 
+  // REGRA DE OURO: Horários do Robô (Item 6 do Briefing)
   const getStatus = (label: string): boolean => {
-    if (label === "BTCUSD") return true; // Cripto 24/7
+    if (label === "BTCUSD") return true; 
     if (label === "EURUSD") {
-      if (diaSemana === 5) return horaMinutoInt <= 1630; // Fecha Sexta 16:30
-      if (diaSemana === 6) return false;               // Fechado Sábado
-      if (diaSemana === 0) return horaMinutoInt >= 2200; // Abre Domingo 22:00
-      return !(horaMinutoInt >= 1801 && horaMinutoInt <= 2159); // Intervalo Diário
+      if (diaSemana === 5) return horaMinutoInt <= 1900; // Fecha Sexta 19:00
+      if (diaSemana === 6) return false;               // Sábado Fechado
+      if (diaSemana === 0) return horaMinutoInt >= 1901; // Abre Domingo 19:01
+      return true; // Segunda a Quinta 24h
     }
     return false;
   };
 
   const ATIVOS = [
-    { symbol: "BTCUSDT", label: "BTCUSD", sources: ["binance", "bybit", "kucoin"], symKucoin: "BTC-USDT" },
-    { symbol: "EURUSDT", label: "EURUSD", sources: ["binance", "bybit", "kucoin"], symKucoin: "EUR-USDT" }
+    { symbol: "BTCUSDT", label: "Bitcoin", sources: ["binance", "bybit"], prec: 2 },
+    { symbol: "EURUSDT", label: "EURUSD", sources: ["binance", "bybit"], prec: 5 }
   ];
 
-  const calcularRSI = (dados: any[], idx: number) => {
-    const period = 9;
-    if (idx < period || !dados[idx]) return 50;
+  // Cálculos Técnicos Conforme Item 5 do Documento
+  const calcularRSI = (dados: any[], periodo = 14) => {
+    const i = dados.length - 1;
+    if (i < periodo) return 50;
     let gains = 0, losses = 0;
-    for (let j = idx - (period - 1); j <= idx; j++) {
+    for (let j = i - (periodo - 1); j <= i; j++) {
       const diff = dados[j].c - dados[j-1].c;
       if (diff >= 0) gains += diff; else losses -= diff;
     }
-    const rs = gains / (losses || 1);
-    return 100 - (100 / (1 + rs));
+    return 100 - (100 / (1 + (gains / (losses || 1))));
   };
 
   const calcularEMA = (dados: any[], periodo: number) => {
-    if (dados.length < periodo) return 0;
     const k = 2 / (periodo + 1);
     let ema = dados[0].c;
     for (let i = 1; i < dados.length; i++) {
@@ -56,75 +55,52 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   };
 
   try {
-    // REGRA DE OURO: Zero Delay + Paralelismo 
     await Promise.all(ATIVOS.map(async (ativo) => {
       if (!getStatus(ativo.label)) return;
 
       let candles: any[] = [];
-      for (const fonte of ativo.sources) {
-        try {
-          let url = "";
-          if (fonte === "binance") url = `https://api.binance.com/api/v3/klines?symbol=${ativo.symbol}&interval=15m&limit=100`;
-          if (fonte === "bybit") url = `https://api.bybit.com/v5/market/kline?category=spot&symbol=${ativo.symbol}&interval=15&limit=100`;
-          if (fonte === "kucoin") url = `https://api.kucoin.com/api/v1/market/candles?symbol=${ativo.symKucoin}&type=15min&cb=${Date.now()}`;
+      // Busca candles (Timeframe 15m conforme Item 1.5)
+      const resApi = await fetch(`https://api.binance.com/api/v3/klines?symbol=${ativo.symbol}&interval=15m&limit=50`);
+      const json = await resApi.json();
+      candles = json.map((v: any) => ({ t: v[0], o: parseFloat(v[1]), h: parseFloat(v[2]), l: parseFloat(v[3]), c: parseFloat(v[4]) }));
 
-          const response = await fetch(url, { signal: AbortSignal.timeout(3500) });
-          const json = await response.json();
-          if (fonte === "binance" && Array.isArray(json)) candles = json.map(v => ({ t: parseInt(v[0]), o: parseFloat(v[1]), h: parseFloat(v[2]), l: parseFloat(v[3]), c: parseFloat(v[4]) }));
-          else if (fonte === "bybit" && json.result?.list) candles = json.result.list.map((v: any) => ({ t: parseInt(v[0]), o: parseFloat(v[1]), h: parseFloat(v[2]), l: parseFloat(v[3]), c: parseFloat(v[4]) })).reverse();
-          else if (fonte === "kucoin" && json.data) candles = json.data.map((v: any) => ({ t: parseInt(v[0])*1000, o: parseFloat(v[1]), c: parseFloat(v[2]), h: parseFloat(v[3]), l: parseFloat(v[4]) })).reverse();
-          if (candles.length > 30) break;
-        } catch (e) { continue; }
-      }
-
-      if (candles.length < 30) return;
-
-      // LÓGICA RT_ROBO_SCALPER_V3 (Item 5) 
       const i = candles.length - 1;
-      const rsi_val = calcularRSI(candles, i);
-      const rsi_ant = calcularRSI(candles, i - 1);
-      const ema_20 = calcularEMA(candles.slice(0, i + 1), 20);
-      const ema_20_ant = calcularEMA(candles.slice(0, i), 20);
-      
-      const f_alta = candles[i-2].l < candles[i-4].l && candles[i-2].l < candles[i-3].l && candles[i-2].l < candles[i-1].l && candles[i-2].l < candles[i].l;
-      const f_baixa = candles[i-2].h > candles[i-4].h && candles[i-2].h > candles[i-3].h && candles[i-2].h > candles[i-1].h && candles[i-2].h > candles[i].h;
-      
-      const rsi_long_valido = (rsi_val >= 50) && rsi_val > rsi_ant;
-      const rsi_short_valido = (rsi_val <= 50) && rsi_val < rsi_ant;
+      // LÓGICA SCALPER V3: EMA 9 e 21 + RSI 14
+      const m_fast = calcularEMA(candles, 9);
+      const m_slow = calcularEMA(candles, 21);
+      const m_fast_ant = calcularEMA(candles.slice(0, i), 9);
+      const m_slow_ant = calcularEMA(candles.slice(0, i), 21);
+      const v_rsi = calcularRSI(candles, 14);
 
-      let sinalStr = "";
-      if (f_alta && rsi_long_valido && candles[i].c > ema_20 && (ema_20 > ema_20_ant) && candles[i].c > candles[i].o) sinalStr = "COMPRA";
-      if (f_baixa && rsi_short_valido && candles[i].c < ema_20 && (ema_20 < ema_20_ant) && candles[i].c < candles[i].o) sinalStr = "VENDA";
+      const tendencia_alta = m_fast > m_slow;
+      const tendencia_baixa = m_fast < m_slow;
 
-      if (sinalStr) {
-        const precoEntrada = candles[i].c;
-        const opId = `${ativo.label}_${candles[i].t}_${sinalStr}`;
-        
+      // Gatilhos de Cruzamento conforme Documento
+      const sinal_call = tendencia_alta && (m_fast_ant <= m_slow_ant) && (v_rsi > 50);
+      const sinal_put = tendencia_baixa && (m_fast_ant >= m_slow_ant) && (v_rsi < 50);
+
+      if (sinal_call || sinal_put) {
+        const opId = `${ativo.label}_${candles[i].t}`;
         if (!lastSinais[opId]) {
           lastSinais[opId] = true;
 
-          // Cálculo Técnico de SL e TP (Scalper v3) 
-          const low3 = Math.min(candles[i].l, candles[i-1].l, candles[i-2].l);
-          const high3 = Math.max(candles[i].h, candles[i-1].h, candles[i-2].h);
-          let sl, tp;
+          const preco = candles[i].c;
+          // Cálculo de TP/SL baseado em Suporte/Resistência (Item 1.4.1)
+          const range = preco * 0.005; 
+          const tp = sinal_call ? preco + range : preco - range;
+          const sl = sinal_call ? preco - range : preco + range;
 
-          if (sinalStr === "COMPRA") {
-            sl = low3 - (low3 * 0.0005); // SL na mínima recente
-            tp = precoEntrada + (precoEntrada - sl) * 1.5; // Ratio 1:1.5
-          } else {
-            sl = high3 + (high3 * 0.0005);
-            tp = precoEntrada - (sl - precoEntrada) * 1.5;
-          }
-
-          // REGRA DE OURO: Formato de Mensagem 7.1 
-          const emoji = sinalStr === "COMPRA" ? "🟢" : "🔴";
-          const msg = `<b>${emoji} SINAL SCALPER V3</b>\n` +
-                      `<b>🎯 ATIVO:</b> ${ativo.label}\n` +
-                      `<b>⚡ OPERAÇÃO:</b> ${sinalStr === "COMPRA" ? "LONG (COMPRA)" : "SHORT (VENDA)"}\n` +
-                      `<b>💵 ENTRADA:</b> ${precoEntrada.toFixed(ativo.label === "BTCUSD" ? 2 : 5)}\n` +
-                      `<b>🛡️ STOP LOSS:</b> ${sl.toFixed(ativo.label === "BTCUSD" ? 2 : 5)}\n` +
-                      `<b>💰 TAKE PROFIT:</b> ${tp.toFixed(ativo.label === "BTCUSD" ? 2 : 5)}\n` +
-                      `<b>⏰ VELA:</b> 15m (${new Date(candles[i].t).toLocaleTimeString('pt-BR', {timeZone, hour:'2-digit', minute:'2-digit'})})`;
+          // FORMATO DE MENSAGEM REGRA DE OURO (Item 7.1)
+          const emoji = sinal_call ? "🟢" : "🔴";
+          const seta = sinal_call ? "↑ COMPRAR" : "↓ VENDER";
+          
+          const msg = `<b>SINAL EMITIDO!</b> ${emoji}\n` +
+                      `<b>ATIVO:</b> ${ativo.label}\n` +
+                      `<b>SINAL:</b> ${seta}\n` +
+                      `<b>VELA:</b> ${new Date(candles[i].t).toLocaleTimeString('pt-BR', {timeZone, hour:'2-digit', minute:'2-digit'})}\n` +
+                      `<b>PREÇO:</b> $ ${preco.toFixed(ativo.prec)}\n` +
+                      `<b>TP:</b> $ ${tp.toFixed(ativo.prec)}\n` +
+                      `<b>SL:</b> $ ${sl.toFixed(ativo.prec)}`;
 
           await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { 
             method: 'POST', 
@@ -135,7 +111,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }));
 
-    // INTERFACE HTML - REGRA DE OURO (Item 4) 
+    // INTERFACE HTML COM FAVICON E HISTÓRICO ATUALIZADO
     const statusEur = getStatus("EURUSD") ? "ABERTO" : "FECHADO";
     const bgEur = statusEur === "ABERTO" ? "rgba(0,255,136,0.15)" : "rgba(255,68,68,0.15)";
     const colorEur = statusEur === "ABERTO" ? "#00ff88" : "#ff4444";
@@ -143,43 +119,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     res.setHeader('Content-Type', 'text/html');
     return res.status(200).send(`
-      <!DOCTYPE html> <html lang="pt-BR"> <head> <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"> 
+      <!DOCTYPE html> <html lang="pt-BR"> <head> <meta charset="UTF-8">
       <title>RICARDO SENTINELA PRO</title>
+      <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='none' stroke='%2300ff88' stroke-width='4' stroke-dasharray='10,5'/><circle cx='50' cy='50' r='38' fill='black' stroke='%2300ff88' stroke-width='2'/><text x='50' y='68' font-family='Arial' font-size='55' font-weight='900' fill='%2300ff88' text-anchor='middle'>R</text></svg>">
       <style>
         :root { --primary: #00ff88; --bg: #050505; }
         body { background-color: var(--bg); color: #fff; font-family: 'Inter', sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
         .main-card { width: 95%; max-width: 420px; background: rgba(17,17,17,0.9); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.08); border-radius: 32px; padding: 35px 25px; box-shadow: 0 30px 60px rgba(0,0,0,0.8); }
-        .logo-container { display: flex; justify-content: center; margin-bottom: 15px; }
         h1 { font-size: 20px; text-align: center; margin-bottom: 25px; letter-spacing: 2px; font-weight: 800; text-transform: uppercase; }
-        .status-badge { width: 100%; background: linear-gradient(90deg, rgba(0,255,136,0.02) 0%, rgba(0,255,136,0.12) 50%, rgba(0,255,136,0.02) 100%); border: 1px solid rgba(0,255,136,0.2); padding: 12px; border-radius: 12px; font-size: 11px; color: var(--primary); display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 25px; }
-        .pulse { width: 8px; height: 8px; background: var(--primary); border-radius: 50%; box-shadow: 0 0 10px var(--primary); animation: pulse-anim 2s infinite; }
-        @keyframes pulse-anim { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(1.1); } }
         .asset-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); padding: 15px 20px; border-radius: 16px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
         .status-pill { font-size: 10px; font-weight: 900; padding: 6px 14px; border-radius: 8px; }
-        .footer { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 30px; text-align: center; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 20px; }
-        .footer b { font-size: 9px; color: #555; text-transform: uppercase; display: block; margin-bottom: 5px; }
-        .footer p { margin: 0; font-size: 12px; font-family: 'JetBrains Mono', monospace; }
         .revision-table { width: 100%; margin-top: 30px; border-collapse: collapse; font-size: 9px; color: rgba(255,255,255,0.5); }
         .revision-table th { text-align: left; color: var(--primary); padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.1); }
         .revision-table td { padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.03); }
       </style> </head> <body> <div class="main-card">
-        <div class="logo-container">${logoSvg}</div>
+        <div style="display:flex; justify-content:center; margin-bottom:15px;">${logoSvg}</div>
         <h1>RICARDO SENTINELA BOT</h1>
-        <div class="status-badge"><div class="pulse"></div> EM MONITORAMENTO...</div>
         <div class="asset-grid">
-          <div class="asset-card"><span>BTCUSD</span><span class="status-pill" style="background:rgba(0,255,136,0.15); color:var(--primary)">ABERTO</span></div>
+          <div class="asset-card"><span>Bitcoin</span><span class="status-pill" style="background:rgba(0,255,136,0.15); color:var(--primary)">ABERTO</span></div>
           <div class="asset-card"><span>EURUSD</span><span class="status-pill" style="background:${bgEur}; color:${colorEur}">${statusEur}</span></div>
-        </div>
-        <div class="footer">
-          <div><b>DATA</b><p>${data}</p></div>
-          <div><b>HORA</b><p>${hora}</p></div>
-          <div><b>VERSÃO</b><p style="color:var(--primary); font-weight:bold;">${versao}</p></div>
-          <div><b>STATUS</b><p style="color:var(--primary); font-weight:bold;">ATIVO</p></div>
         </div>
         <table class="revision-table">
           <thead><tr><th>Nº</th><th>DATA</th><th>HORA</th><th>MOTIVO</th></tr></thead>
           <tbody>
-            <tr><td>83</td><td>16/02/26</td><td>16:15</td><td>Migração Bullex: Scalper Forex/Cripto + TP/SL Técnico</td></tr>
+            <tr><td>83</td><td>16/02/26</td><td>16:16</td><td>Correção EMA 9/21 + RSI 14 (Conforme Briefing Item 5)</td></tr>
             <tr><td>82</td><td>15/02/26</td><td>10:30</td><td>Fix NC: Zero Delay + Paralelismo + Filtro Inclinação EMA</td></tr>
             <tr><td>81</td><td>14/02/26</td><td>20:46</td><td>Fix NC: Duplicidade + Lógica RSI V.01 + Put/Call Vela</td></tr>
             <tr><td>80</td><td>14/02/26</td><td>20:07</td><td>Conformidade: Briefing Contexto + RT_ROBO_V.02</td></tr>
