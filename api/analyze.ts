@@ -7,7 +7,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // CONFIGURAÇÕES DE VERSÃO E REVISÃO
   const versao = "89";
   const dataRevisao = "16/02/2026";
-  const horaRevisao = "17:30";
+  const horaRevisao = "18:05";
   
   const token = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = "7625668696";
@@ -18,7 +18,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const horaMinutoInt = parseInt(horaAtualHHMM.replace(':', ''));
   const diaSemana = agora.getDay(); 
 
-  // 1. REGRA DE HORÁRIOS FOREX (ITEM 6)
+  // 1. REGRA DE HORÁRIOS FOREX (ITEM 6) 
   const isEurOpen = (): boolean => {
     if (diaSemana >= 1 && diaSemana <= 4) return true;
     if (diaSemana === 5) return horaMinutoInt <= 1900;
@@ -44,7 +44,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const precoAtual = dados[i].c;
       const tempoVela = new Date(dados[i].t).toLocaleTimeString('pt-BR', optionsTime);
 
-      // LÓGICA TÉCNICA RT_ROBO_SCALPER_V3 (ITEM 5)
+      // LÓGICA TÉCNICA RT_ROBO_SCALPER_V3 (ITEM 5) 
       const calcEMA = (d: any[], p: number) => {
         const k = 2 / (p + 1);
         let ema = d[0].c;
@@ -54,16 +54,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const m9 = calcEMA(dados, 9);
       const m21 = calcEMA(dados, 21);
-      const rsi14 = 50; // Simplificação para exemplo; deve-se calcular o RSI real aqui
+      
+      // Cálculo do RSI 14 real para cumprir a trava do indicador 
+      const gains = [], losses = [];
+      for (let j = i - 14; j < i; j++) {
+        const diff = dados[j+1].c - dados[j].c;
+        diff >= 0 ? gains.push(diff) : losses.push(Math.abs(diff));
+      }
+      const avgGain = gains.reduce((a, b) => a + b, 0) / 14;
+      const avgLoss = losses.reduce((a, b) => a + b, 0) / 14;
+      const rsi14 = avgLoss === 0 ? 100 : 100 - (100 / (1 + (avgGain / avgLoss)));
 
+      // GATILHOS DE CRUZAMENTO + RSI 
       const sinalCall = m9 > m21 && rsi14 > 50;
       const sinalPut = m9 < m21 && rsi14 < 50;
 
-      // Cálculo simplificado de Suporte/Resistência para TP/SL (ITEM 7.1)
+      // Suporte e Resistência para TP/SL 
       const resis = Math.max(...dados.slice(i-20).map(d => d.h));
       const sup = Math.min(...dados.slice(i-20).map(d => d.l));
 
-      // GATILHO ITEM 7.1: COMPRA OU VENDA
+      // 4.1. FORMATO DE MENSAGENS DE COMPRA OU VENDA (ITEM 7.1) 
       if (sinalCall || sinalPut) {
         const opId = `${ativo.label}_entrada`;
         if (!lastSinais[opId]) {
@@ -87,7 +97,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
 
-      // GATILHO ITEM 7.2: AVISO DE REVERSÃO
+      // 4.2. FORMATO DE MENSAGENS DE AVISO DE REVERSÃO (ITEM 7.2) 
       const opAtiva = lastSinais[`${ativo.label}_entrada`];
       if (opAtiva) {
         const reversaoAlta = opAtiva.direcao === 'baixa' && m9 > m21;
@@ -110,9 +120,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
     }
-  } catch (e) { console.error("Erro."); }
+  } catch (e) { console.error("Erro na execução."); }
 
-  // 3. INTERFACE HTML - REGRA DE OURO (ITEM 4)
+  // 3. INTERFACE HTML - REGRA DE OURO (ITEM 4) 
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   return res.status(200).send(`
     <!DOCTYPE html>
