@@ -1,12 +1,13 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 
+// Memória global para evitar reincidências (NC 92-01 R1)
 let cacheSinais: Record<string, string> = {};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // CONFIGURAÇÃO DE IDENTIFICAÇÃO - VERSÃO 98
-  const versao = "98";
+  // CONFIGURAÇÃO DE IDENTIFICAÇÃO - VERSÃO 99
+  const versao = "99";
   const dataRevisao = "17/02/2026";
-  const horaRevisao = "12:15"; 
+  const horaRevisao = "12:30"; 
   
   const token = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = "7625668696";
@@ -14,16 +15,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const optionsTime = { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false } as const;
 
-  // FETCHERS (REDUNDÂNCIA TOTAL)
+  // FETCHERS (REDUNDÂNCIA TOTAL PARA BTC E EURUSD)
   async function getBTC() {
     const urls = [`https://api.kucoin.com/api/v1/market/candles?symbol=BTC-USDT&type=15min`, `https://api.bybit.com/v5/market/kline?category=spot&symbol=BTCUSDT&interval=15&limit=50` ];
     for (const u of urls) {
       try {
         const res = await fetch(u, { signal: AbortSignal.timeout(4000) });
         const d = await res.json();
-        const raw = u.includes('kucoin') ? d.data : d.result.list;
+        const isKu = u.includes('kucoin');
+        const raw = isKu ? d.data : d.result.list;
         return raw.map((v: any) => ({ t: Number(v[0]), c: parseFloat(v[4]), h: parseFloat(v[2]), l: parseFloat(v[3]) })).sort((a:any, b:any) => a.t - b.t);
-      } catch (e) { console.error("BTC API Down"); }
+      } catch (e) { console.error("Erro API BTC"); }
     }
     return null;
   }
@@ -49,15 +51,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     for (const ativo of ativos) {
       if (!ativo.data || ativo.data.length < 30) continue;
 
-      const i = ativo.data.length - 2; // Vela Fechada
+      const i = ativo.data.length - 2; // VELA FECHADA
       const vela = ativo.data[i];
       const dataVela = new Date(vela.t);
       const tempoVela = dataVela.toLocaleTimeString('pt-BR', optionsTime);
 
-      // Trava de Horário (Múltiplos de 15m) para evitar NC 91-01
+      // Trava de Sincronismo (Múltiplos de 15m) - NC 91-01
       if (dataVela.getMinutes() % 15 !== 0) continue;
 
-      // --- CÁLCULO ATR (14 períodos) ---
+      // CÁLCULO ATR (14 períodos) - VOLATILIDADE REAL
       let trSoma = 0;
       for (let j = i - 13; j <= i; j++) {
         const h = ativo.data[j].h;
@@ -67,7 +69,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       const atr = trSoma / 14;
 
-      // LÓGICA TÉCNICA (EMA 9/21)
+      // LÓGICA MÉDIAS MÓVEIS (9/21)
       const calcEMA = (p: number) => {
         const k = 2 / (p + 1);
         let e = ativo.data[0].c;
@@ -77,11 +79,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const m9 = calcEMA(9), m21 = calcEMA(21);
       const call = m9 > m21; const put = m9 < m21;
 
+      // TRAVA DE SPAM (NC 92-01 R1)
       const sinalId = `${ativo.label}_${tempoVela}`;
       if ((call || put) && cacheSinais[ativo.label] !== sinalId) {
         cacheSinais[ativo.label] = sinalId;
 
-        // ESTRATÉGIA ATR: TP = Entrada ± (1.5 * ATR) | SL = Entrada ∓ (2.0 * ATR)
+        // DEFINIÇÃO DOS ALVOS BASEADOS NO ATR (1.5x ATR para TP | 2x ATR para SL)
         const tpFinal = call ? (vela.c + (atr * 1.5)) : (vela.c - (atr * 1.5));
         const slFinal = call ? (vela.c - (atr * 2.0)) : (vela.c + (atr * 2.0));
 
@@ -100,7 +103,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
       }
     }
-  } catch (e) { console.error("Erro Ciclo v98"); }
+  } catch (e) { console.error("Erro no Processamento"); }
 
   // INTERFACE HTML - REGRA DE OURO
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
