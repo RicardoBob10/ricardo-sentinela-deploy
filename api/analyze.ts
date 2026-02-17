@@ -1,12 +1,13 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 
-// Cache para controle de sinais e acompanhamento de reversão
-let lastSinais: Record<string, any> = {};
+// Cache para evitar duplicidade de sinais dentro da mesma vela
+let lastSinais: Record<string, string> = {};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const versao = "91";
+  // ATUALIZAÇÃO PARA VERSÃO 92 - TRATAMENTO DE REINCIDÊNCIAS NC 89-01 E 89-02
+  const versao = "92";
   const dataRevisao = "16/02/2026";
-  const horaRevisao = "18:30"; 
+  const horaRevisao = "21:30"; 
   
   const token = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = "7625668696";
@@ -18,7 +19,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const diaSemana = agora.getDay(); 
 
   // REGRA DE HORÁRIOS FOREX (ITEM 6)
-  const getMercadoStatus = () => {
+  const getMercadoStatus = (): string => {
     if (diaSemana >= 1 && diaSemana <= 4) return "ABERTO";
     if (diaSemana === 5) return horaMinutoInt <= 1900 ? "ABERTO" : "FECHADO";
     if (diaSemana === 0) return horaMinutoInt >= 1901 ? "ABERTO" : "FECHADO";
@@ -26,19 +27,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   };
   const mercadoStatus = getMercadoStatus();
 
-  // FUNÇÃO DE CASCATA DE APIs (BINANCE > BYBIT > KUCOIN) - AÇÃO CORRETIVA NC 89-1/2
+  // TRIPLA REDUNDÂNCIA DE APIs (AÇÃO CORRETIVA EFICAZ - NC 89-01)
   async function fetchCandles(symbol: string) {
+    // 1. BINANCE
     try {
       const r = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=15m&limit=100`);
       if (r.ok) return await r.json();
-    } catch (e) { console.warn("Binance Offline..."); }
+    } catch (e) { console.warn(`Binance Offline: ${symbol}`); }
 
+    // 2. BYBIT (BACKUP 1)
     try {
       const r = await fetch(`https://api.bybit.com/v5/market/kline?category=spot&symbol=${symbol}&interval=15&limit=100`);
       const j = await r.json();
       if (j.result?.list) return j.result.list.map((v: any) => [v[0], v[1], v[2], v[3], v[4]]);
-    } catch (e) { console.warn("Bybit Offline..."); }
+    } catch (e) { console.warn(`Bybit Offline: ${symbol}`); }
 
+    // 3. KUCOIN (BACKUP 2)
     try {
       const r = await fetch(`https://api.kucoin.com/api/v1/market/candles?symbol=${symbol.replace('USDT', '-USDT')}&type=15min`);
       const j = await r.json();
@@ -56,11 +60,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!ativo.operando) continue;
 
       const candles = await fetchCandles(ativo.symbol);
-      const dados = candles.map((v: any) => ({ t: v[0], c: parseFloat(v[4]), h: parseFloat(v[2]), l: parseFloat(v[3]) }));
+      if (!candles) continue;
+
+      const dados = candles.map((v: any) => ({ t: Number(v[0]), c: parseFloat(v[4]), h: parseFloat(v[2]), l: parseFloat(v[3]) }));
       const i = dados.length - 1;
       const precoAtual = dados[i].c;
       const tempoVela = new Date(dados[i].t).toLocaleTimeString('pt-BR', optionsTime);
 
+      // LÓGICA TÉCNICA RT_ROBO_SCALPER_V3 (ITEM 5)
       const calcEMA = (d: any[], p: number) => {
         const k = 2 / (p + 1);
         let ema = d[0].c;
@@ -80,16 +87,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const sinalCall = m9 > m21 && rsi14 > 50;
       const sinalPut = m9 < m21 && rsi14 < 50;
+
       const resis = Math.max(...dados.slice(i-20).map(d => d.h));
       const sup = Math.min(...dados.slice(i-20).map(d => d.l));
 
-      // 7.1 FORMATO DE MENSAGENS DE COMPRA OU VENDA (REGRA DE OURO)
+      // 7.1 FORMATO SINAL EMITIDO (REGRA DE OURO)
       if (sinalCall || sinalPut) {
-        const opId = `${ativo.label}_${tempoVela}`;
-        if (!lastSinais[opId]) {
-          lastSinais[opId] = { hora: tempoVela, direcao: sinalCall ? 'alta' : 'baixa' };
-          const circulo = sinalCall ? "🟢" : "🔴";
-          const msg71 = `<b>${circulo} SINAL EMITIDO!</b>\n` +
+        if (lastSinais[ativo.label] !== tempoVela) {
+          lastSinais[ativo.label] = tempoVela;
+          const circ = sinalCall ? "🟢" : "🔴";
+          const msg71 = `${circ} <b>SINAL EMITIDO!</b>\n` +
                         `<b>ATIVO:</b> ${ativo.label}\n` +
                         `<b>SINAL:</b> ${sinalCall ? '↑ COMPRAR' : '↓ VENDER'}\n` +
                         `<b>VELA:</b> ${tempoVela}\n` +
@@ -105,15 +112,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
 
-      // 7.2 FORMATO DE MENSAGENS DE AVISO DE REVERSÃO
-      const opAtivaId = Object.keys(lastSinais).find(key => key.startsWith(ativo.label));
-      if (opAtivaId) {
-        const opAtiva = lastSinais[opAtivaId];
-        if ((opAtiva.direcao === 'baixa' && m9 > m21) || (opAtiva.direcao === 'alta' && m9 < m21)) {
-          const msg72 = `<b>⚠️AVISO DE REVERSÃO</b>\n\n` +
+      // 7.2 FORMATO AVISO DE REVERSÃO (ITEM 7.2)
+      const reversao = (sinalCall && m9 < m21) || (sinalPut && m9 > m21);
+      if (reversao && lastSinais[ativo.label] === tempoVela) {
+          const msg72 = `⚠️ <b>AVISO DE REVERSÃO</b>\n\n` +
                         `<b>STATUS:</b> <b>TAKE PROFIT!</b>\n` +
                         `<b>ATIVO:</b> ${ativo.label}\n` +
-                        `<b>VELA ANTERIOR:</b> ${opAtiva.hora}\n` +
+                        `<b>VELA ANTERIOR:</b> ${tempoVela}\n` +
                         `<b>VELA ATUAL:</b> ${horaAtualHHMM}\n` +
                         `<b>PREÇO ATUAL:</b> $ ${precoAtual.toFixed(ativo.prec)}`;
 
@@ -122,18 +127,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ chat_id, text: msg72, parse_mode: 'HTML' })
           });
-          delete lastSinais[opAtivaId];
-        }
+          delete lastSinais[ativo.label];
       }
     }
-  } catch (e) { console.error("Erro técnico."); }
+  } catch (e) { console.error("Erro na execução do ciclo."); }
 
+  // INTERFACE HTML - REGRA DE OURO (ITEM 4)
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   return res.status(200).send(`
     <!DOCTYPE html>
     <html lang="pt-BR">
     <head><meta charset="UTF-8"><title>RICARDO SENTINELA BOT</title>
-    <style>body{background-color:#fff;color:#000;font-family:sans-serif;padding:40px;}b{font-weight:bold;}.verde{color:#008000;font-weight:bold;}</style></head>
+    <style>
+      body { background-color: #ffffff; color: #000000; font-family: sans-serif; padding: 40px; }
+      b { font-weight: bold; }
+      .verde { color: #008000; font-weight: bold; }
+    </style></head>
     <body>
       <div>_________________________________________________________________</div>
       <p><b>RICARDO SENTINELA BOT</b></p>
