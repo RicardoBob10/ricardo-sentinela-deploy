@@ -1,21 +1,22 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 
-// Memória volátil (limpa no deploy, por isso a trava de tempo abaixo é vital)
+// Memória volátil - Reforçada com trava de tempo real
 let cacheSinais: Record<string, string> = {};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const versao = "100";
+  const versao = "101";
   const dataRevisao = "17/02/2026";
-  const horaRevisao = "12:45"; 
+  const horaRevisao = "12:55"; 
   
   const token = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = "7625668696";
   const twelveDataKey = "e36e4f3a97124f5c9e2b1d3f5a7c9e1b";
 
-  const agoraUnix = Date.now();
+  const agora = new Date();
+  const agoraUnix = agora.getTime();
   const optionsTime = { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false } as const;
 
-  // FETCHERS (MANTIDOS COM FOCO EM ESTABILIDADE)
+  // FETCHERS
   async function getBTC() {
     const urls = [`https://api.kucoin.com/api/v1/market/candles?symbol=BTC-USDT&type=15min`, `https://api.bybit.com/v5/market/kline?category=spot&symbol=BTCUSDT&interval=15&limit=50` ];
     for (const u of urls) {
@@ -50,32 +51,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     for (const ativo of ativos) {
       if (!ativo.data || ativo.data.length < 30) continue;
 
-      // --- ESTRATÉGIA DE SINCRONISMO REAL ---
-      // Pegamos a última vela fechada disponível
+      // Pegamos a vela que ACABOU de fechar
       const i = ativo.data.length - 2; 
       const vela = ativo.data[i];
-      const diffMinutos = (agoraUnix - vela.t) / 60000;
-
-      // TRAVA 1: Só envia sinal se a vela fechou há menos de 5 minutos (Evita spam no Deploy)
-      if (diffMinutos > 5) continue;
+      
+      // --- AÇÃO CORRETIVA CRÍTICA: JANELA DE DISPARO ---
+      // Calculamos a diferença em SEGUNDOS entre o agora e o fechamento da vela
+      // Se a vela fechou às 12:15, o robô só pode enviar sinal entre 12:15:00 e 12:15:45.
+      const tempoDesdeFechamentoSegundos = (agoraUnix - (vela.t + 900000)) / 1000; 
+      
+      // Se passaram mais de 60 segundos do fechamento oficial, ignoramos (evita sinal atrasado e spam)
+      if (tempoDesdeFechamentoSegundos > 60 || tempoDesdeFechamentoSegundos < -60) continue;
 
       const dataVela = new Date(vela.t);
-      const tempoVela = dataVela.toLocaleTimeString('pt-BR', optionsTime);
+      const tempoVelaStr = dataVela.toLocaleTimeString('pt-BR', optionsTime);
 
-      // TRAVA 2: Apenas velas oficiais de 15m (00, 15, 30, 45)
+      // Filtro de 15 minutos exatos
       if (dataVela.getMinutes() % 15 !== 0) continue;
 
-      // CÁLCULO ATR (14p)
+      // Cálculo ATR e EMA (Mesma lógica da v100)
       let trSoma = 0;
       for (let j = i - 13; j <= i; j++) {
-        const h = ativo.data[j].h;
-        const l = ativo.data[j].l;
-        const cp = ativo.data[j-1].c;
+        const h = ativo.data[j].h; const l = ativo.data[j].l; const cp = ativo.data[j-1].c;
         trSoma += Math.max(h - l, Math.abs(h - cp), Math.abs(l - cp));
       }
       const atr = trSoma / 14;
 
-      // LÓGICA EMA 9/21
       const calcEMA = (p: number) => {
         const k = 2 / (p + 1);
         let e = ativo.data[0].c;
@@ -95,7 +96,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const msg = `${call ? "🟢" : "🔴"} <b>SINAL EMITIDO!</b>\n` +
                     `<b>ATIVO:</b> ${ativo.label}\n` +
                     `<b>SINAL:</b> ${call ? '↑ COMPRAR' : '↓ VENDER'}\n` +
-                    `<b>VELA:</b> ${tempoVela}\n` +
+                    `<b>VELA:</b> ${tempoVelaStr}\n` +
                     `<b>PREÇO:</b> $ ${vela.c.toFixed(ativo.prec)}\n` +
                     `<b>TP (ATR):</b> $ ${tpFinal.toFixed(ativo.prec)}\n` +
                     `<b>SL (ATR):</b> $ ${slFinal.toFixed(ativo.prec)}`;
