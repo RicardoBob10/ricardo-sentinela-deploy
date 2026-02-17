@@ -1,31 +1,30 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 
-// Memória global para evitar reincidências (NC 92-01 R1)
+// Memória volátil (limpa no deploy, por isso a trava de tempo abaixo é vital)
 let cacheSinais: Record<string, string> = {};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // CONFIGURAÇÃO DE IDENTIFICAÇÃO - VERSÃO 99
-  const versao = "99";
+  const versao = "100";
   const dataRevisao = "17/02/2026";
-  const horaRevisao = "12:30"; 
+  const horaRevisao = "12:45"; 
   
   const token = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = "7625668696";
   const twelveDataKey = "e36e4f3a97124f5c9e2b1d3f5a7c9e1b";
 
+  const agoraUnix = Date.now();
   const optionsTime = { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false } as const;
 
-  // FETCHERS (REDUNDÂNCIA TOTAL PARA BTC E EURUSD)
+  // FETCHERS (MANTIDOS COM FOCO EM ESTABILIDADE)
   async function getBTC() {
     const urls = [`https://api.kucoin.com/api/v1/market/candles?symbol=BTC-USDT&type=15min`, `https://api.bybit.com/v5/market/kline?category=spot&symbol=BTCUSDT&interval=15&limit=50` ];
     for (const u of urls) {
       try {
         const res = await fetch(u, { signal: AbortSignal.timeout(4000) });
         const d = await res.json();
-        const isKu = u.includes('kucoin');
-        const raw = isKu ? d.data : d.result.list;
+        const raw = u.includes('kucoin') ? d.data : d.result.list;
         return raw.map((v: any) => ({ t: Number(v[0]), c: parseFloat(v[4]), h: parseFloat(v[2]), l: parseFloat(v[3]) })).sort((a:any, b:any) => a.t - b.t);
-      } catch (e) { console.error("Erro API BTC"); }
+      } catch (e) { }
     }
     return null;
   }
@@ -51,15 +50,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     for (const ativo of ativos) {
       if (!ativo.data || ativo.data.length < 30) continue;
 
-      const i = ativo.data.length - 2; // VELA FECHADA
+      // --- ESTRATÉGIA DE SINCRONISMO REAL ---
+      // Pegamos a última vela fechada disponível
+      const i = ativo.data.length - 2; 
       const vela = ativo.data[i];
+      const diffMinutos = (agoraUnix - vela.t) / 60000;
+
+      // TRAVA 1: Só envia sinal se a vela fechou há menos de 5 minutos (Evita spam no Deploy)
+      if (diffMinutos > 5) continue;
+
       const dataVela = new Date(vela.t);
       const tempoVela = dataVela.toLocaleTimeString('pt-BR', optionsTime);
 
-      // Trava de Sincronismo (Múltiplos de 15m) - NC 91-01
+      // TRAVA 2: Apenas velas oficiais de 15m (00, 15, 30, 45)
       if (dataVela.getMinutes() % 15 !== 0) continue;
 
-      // CÁLCULO ATR (14 períodos) - VOLATILIDADE REAL
+      // CÁLCULO ATR (14p)
       let trSoma = 0;
       for (let j = i - 13; j <= i; j++) {
         const h = ativo.data[j].h;
@@ -69,7 +75,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       const atr = trSoma / 14;
 
-      // LÓGICA MÉDIAS MÓVEIS (9/21)
+      // LÓGICA EMA 9/21
       const calcEMA = (p: number) => {
         const k = 2 / (p + 1);
         let e = ativo.data[0].c;
@@ -79,12 +85,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const m9 = calcEMA(9), m21 = calcEMA(21);
       const call = m9 > m21; const put = m9 < m21;
 
-      // TRAVA DE SPAM (NC 92-01 R1)
-      const sinalId = `${ativo.label}_${tempoVela}`;
+      const sinalId = `${ativo.label}_${vela.t}`;
       if ((call || put) && cacheSinais[ativo.label] !== sinalId) {
         cacheSinais[ativo.label] = sinalId;
 
-        // DEFINIÇÃO DOS ALVOS BASEADOS NO ATR (1.5x ATR para TP | 2x ATR para SL)
         const tpFinal = call ? (vela.c + (atr * 1.5)) : (vela.c - (atr * 1.5));
         const slFinal = call ? (vela.c - (atr * 2.0)) : (vela.c + (atr * 2.0));
 
@@ -103,9 +107,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
       }
     }
-  } catch (e) { console.error("Erro no Processamento"); }
+  } catch (e) { }
 
-  // INTERFACE HTML - REGRA DE OURO
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   return res.status(200).send(`
     <!DOCTYPE html>
