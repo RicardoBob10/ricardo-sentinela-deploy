@@ -1,26 +1,27 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 
+// Memória de curto prazo para evitar duplicidade no mesmo ciclo
 let cacheSinais: Record<string, string> = {};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const versao = "103";
+  // CONFIGURAÇÃO DE IDENTIFICAÇÃO - VERSÃO 107
+  const versao = "107";
   const dataRevisao = "17/02/2026";
-  const horaRevisao = "13:15"; 
+  const horaRevisao = "14:15"; 
   
   const token = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = "7625668696";
   const twelveDataKey = "e36e4f3a97124f5c9e2b1d3f5a7c9e1b";
 
-  const agora = new Date();
-  const agoraUnix = agora.getTime();
+  const agoraUnix = Date.now();
   const optionsTime = { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false } as const;
 
-  // FETCHERS (REDUNDÂNCIA ATIVA)
+  // FETCHERS (NC 89-01/02)
   async function getBTC() {
     const urls = [`https://api.kucoin.com/api/v1/market/candles?symbol=BTC-USDT&type=15min`, `https://api.bybit.com/v5/market/kline?category=spot&symbol=BTCUSDT&interval=15&limit=50` ];
     for (const u of urls) {
       try {
-        const res = await fetch(u, { signal: AbortSignal.timeout(3500) });
+        const res = await fetch(u, { signal: AbortSignal.timeout(3000) });
         const d = await res.json();
         const raw = u.includes('kucoin') ? d.data : d.result.list;
         return raw.map((v: any) => ({ t: Number(v[0]), c: parseFloat(v[4]), h: parseFloat(v[2]), l: parseFloat(v[3]) })).sort((a:any, b:any) => a.t - b.t);
@@ -42,39 +43,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const ativos = [
-      { label: "Bitcoin", data: await getBTC(), prec: 2 },
-      { label: "EURUSD", data: await getEUR(), prec: 5 }
-    ];
+    const ativos = [{ label: "Bitcoin", data: await getBTC(), prec: 2 }, { label: "EURUSD", data: await getEUR(), prec: 5 }];
 
     for (const ativo of ativos) {
       if (!ativo.data || ativo.data.length < 30) continue;
 
       const i = ativo.data.length - 2; 
       const vela = ativo.data[i];
+      const dataVela = new Date(vela.t);
       
-      // --- TRAVA DE OURO V103: JANELA DE 30 SEGUNDOS ---
-      // A vela de 12:15 fecha às 12:30:00. O robô SÓ pode disparar entre 12:30:00 e 12:30:30.
+      // TRAVA DE OURO V107: SINCRO ABSOLUTO (NC 95-01 / 91-01)
+      if (dataVela.getMinutes() % 15 !== 0) continue;
+
       const fechamentoVelaUnix = vela.t + (15 * 60 * 1000);
-      const atrasoEmSegundos = (agoraUnix - fechamentoVelaUnix) / 1000;
+      const atrasoSegundos = (agoraUnix - fechamentoVelaUnix) / 1000;
 
-      // Se o robô detectar que a vela fechou há mais de 30 segundos, ele aborta.
-      // Isso impede sinais como o das "12:29" para velas antigas.
-      if (atrasoEmSegundos > 30 || atrasoEmSegundos < -10) continue;
+      // Se o robô detectar a vela com mais de 40 segundos de atraso, ele aborta.
+      // Isso impede sinais atrasados e spams de reinicialização.
+      if (atrasoSegundos > 40 || atrasoSegundos < -10) continue;
 
-      const tempoVelaStr = new Date(vela.t).toLocaleTimeString('pt-BR', optionsTime);
-
-      // Filtro rigoroso de ciclo Bullex
-      if (new Date(vela.t).getMinutes() % 15 !== 0) continue;
-
-      // Cálculo ATR (14p)
-      let trSoma = 0;
-      for (let j = i - 13; j <= i; j++) {
-        const h = ativo.data[j].h; const l = ativo.data[j].l; const cp = ativo.data[j-1].c;
-        trSoma += Math.max(h - l, Math.abs(h - cp), Math.abs(l - cp));
-      }
-      const atr = trSoma / 14;
-
+      // LÓGICA EMA 9/21
       const calcEMA = (p: number) => {
         const k = 2 / (p + 1);
         let e = ativo.data[0].c;
@@ -88,16 +76,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if ((call || put) && cacheSinais[ativo.label] !== sinalId) {
         cacheSinais[ativo.label] = sinalId;
 
+        // CÁLCULO ATR PARA TP/SL (BRIEFING)
+        let trSoma = 0;
+        for (let j = i - 13; j <= i; j++) {
+          const h = ativo.data[j].h; const l = ativo.data[j].l; const cp = ativo.data[j-1].c;
+          trSoma += Math.max(h - l, Math.abs(h - cp), Math.abs(l - cp));
+        }
+        const atr = trSoma / 14;
+
         const tpFinal = call ? (vela.c + (atr * 1.5)) : (vela.c - (atr * 1.5));
         const slFinal = call ? (vela.c - (atr * 2.0)) : (vela.c + (atr * 2.0));
 
         const msg = `${call ? "🟢" : "🔴"} <b>SINAL EMITIDO!</b>\n` +
                     `<b>ATIVO:</b> ${ativo.label}\n` +
                     `<b>SINAL:</b> ${call ? '↑ COMPRAR' : '↓ VENDER'}\n` +
-                    `<b>VELA:</b> ${tempoVelaStr}\n` +
+                    `<b>VELA:</b> ${dataVela.toLocaleTimeString('pt-BR', optionsTime)}\n` +
                     `<b>PREÇO:</b> $ ${vela.c.toFixed(ativo.prec)}\n` +
-                    `<b>TP:</b> $ ${tpFinal.toFixed(ativo.prec)}\n` +
-                    `<b>SL:</b> $ ${slFinal.toFixed(ativo.prec)}`;
+                    `<b>TP (ATR):</b> $ ${tpFinal.toFixed(ativo.prec)}\n` +
+                    `<b>SL (ATR):</b> $ ${slFinal.toFixed(ativo.prec)}`;
 
         await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
           method: 'POST',
@@ -108,7 +104,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   } catch (e) { }
 
-  // INTERFACE HTML - REGRA DE OURO
+  // INTERFACE HTML - REGRA DE OURO REESTABELECIDA
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   return res.status(200).send(`
     <!DOCTYPE html>
