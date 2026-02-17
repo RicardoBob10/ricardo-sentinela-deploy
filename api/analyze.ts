@@ -1,13 +1,13 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 
-// Cache para evitar duplicidade de sinais dentro da mesma vela
+// Memória de sinais para evitar duplicidade e garantir o ciclo de reversão
 let lastSinais: Record<string, string> = {};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // ATUALIZAÇÃO PARA VERSÃO 92 - TRATAMENTO DE REINCIDÊNCIAS NC 89-01 E 89-02
+  // CONFIGURAÇÃO DE IDENTIFICAÇÃO - VERSÃO 92
   const versao = "92";
   const dataRevisao = "16/02/2026";
-  const horaRevisao = "21:30"; 
+  const horaRevisao = "21:40"; 
   
   const token = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = "7625668696";
@@ -27,27 +27,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   };
   const mercadoStatus = getMercadoStatus();
 
-  // TRIPLA REDUNDÂNCIA DE APIs (AÇÃO CORRETIVA EFICAZ - NC 89-01)
+  // TRIPLA REDUNDÂNCIA (AÇÃO PARA NC 89-01, 89-02, 91-02)
   async function fetchCandles(symbol: string) {
-    // 1. BINANCE
-    try {
-      const r = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=15m&limit=100`);
-      if (r.ok) return await r.json();
-    } catch (e) { console.warn(`Binance Offline: ${symbol}`); }
+    const controllers = [
+      { name: 'Binance', url: `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=15m&limit=100` },
+      { name: 'Bybit', url: `https://api.bybit.com/v5/market/kline?category=spot&symbol=${symbol}&interval=15&limit=100` },
+      { name: 'Kucoin', url: `https://api.kucoin.com/api/v1/market/candles?symbol=${symbol.replace('USDT', '-USDT')}&type=15min` }
+    ];
 
-    // 2. BYBIT (BACKUP 1)
-    try {
-      const r = await fetch(`https://api.bybit.com/v5/market/kline?category=spot&symbol=${symbol}&interval=15&limit=100`);
-      const j = await r.json();
-      if (j.result?.list) return j.result.list.map((v: any) => [v[0], v[1], v[2], v[3], v[4]]);
-    } catch (e) { console.warn(`Bybit Offline: ${symbol}`); }
-
-    // 3. KUCOIN (BACKUP 2)
-    try {
-      const r = await fetch(`https://api.kucoin.com/api/v1/market/candles?symbol=${symbol.replace('USDT', '-USDT')}&type=15min`);
-      const j = await r.json();
-      if (j.data) return j.data;
-    } catch (e) { throw new Error("Falha total nas APIs."); }
+    for (const api of controllers) {
+      try {
+        const response = await fetch(api.url, { signal: AbortSignal.timeout(3000) });
+        if (!response.ok) continue;
+        const json = await response.json();
+        
+        // Normalização de dados para diferentes APIs
+        if (api.name === 'Binance') return json;
+        if (api.name === 'Bybit') return json.result.list.map((v: any) => [v[0], v[1], v[2], v[3], v[4]]);
+        if (api.name === 'Kucoin') return json.data;
+      } catch (e) { console.warn(`${api.name} falhou. Tentando próxima...`); }
+    }
+    return null;
   }
 
   try {
@@ -60,14 +60,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!ativo.operando) continue;
 
       const candles = await fetchCandles(ativo.symbol);
-      if (!candles) continue;
+      if (!candles || !Array.isArray(candles)) continue;
 
-      const dados = candles.map((v: any) => ({ t: Number(v[0]), c: parseFloat(v[4]), h: parseFloat(v[2]), l: parseFloat(v[3]) }));
+      const dados = candles.map((v: any) => ({
+        t: Number(v[0]),
+        c: parseFloat(v[4]),
+        h: parseFloat(v[2]),
+        l: parseFloat(v[3])
+      })).filter(d => !isNaN(d.c));
+
       const i = dados.length - 1;
       const precoAtual = dados[i].c;
       const tempoVela = new Date(dados[i].t).toLocaleTimeString('pt-BR', optionsTime);
 
-      // LÓGICA TÉCNICA RT_ROBO_SCALPER_V3 (ITEM 5)
+      // LÓGICA RT_ROBO_SCALPER_V3
       const calcEMA = (d: any[], p: number) => {
         const k = 2 / (p + 1);
         let ema = d[0].c;
@@ -87,11 +93,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const sinalCall = m9 > m21 && rsi14 > 50;
       const sinalPut = m9 < m21 && rsi14 < 50;
-
       const resis = Math.max(...dados.slice(i-20).map(d => d.h));
       const sup = Math.min(...dados.slice(i-20).map(d => d.l));
 
-      // 7.1 FORMATO SINAL EMITIDO (REGRA DE OURO)
+      // 7.1 FORMATO SINAL EMITIDO
       if (sinalCall || sinalPut) {
         if (lastSinais[ativo.label] !== tempoVela) {
           lastSinais[ativo.label] = tempoVela;
@@ -112,7 +117,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
 
-      // 7.2 FORMATO AVISO DE REVERSÃO (ITEM 7.2)
+      // 7.2 FORMATO AVISO DE REVERSÃO
       const reversao = (sinalCall && m9 < m21) || (sinalPut && m9 > m21);
       if (reversao && lastSinais[ativo.label] === tempoVela) {
           const msg72 = `⚠️ <b>AVISO DE REVERSÃO</b>\n\n` +
@@ -130,9 +135,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           delete lastSinais[ativo.label];
       }
     }
-  } catch (e) { console.error("Erro na execução do ciclo."); }
+  } catch (e) { console.error("Falha no ciclo crítico."); }
 
-  // INTERFACE HTML - REGRA DE OURO (ITEM 4)
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   return res.status(200).send(`
     <!DOCTYPE html>
