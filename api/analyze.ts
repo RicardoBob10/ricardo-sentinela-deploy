@@ -10,9 +10,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // ===========================================================================
   // CONFIGURAÇÃO DE IDENTIFICAÇÃO — VERSÃO 110.1
   // ===========================================================================
-  const versao      = "110.1";
+  const versao      = "110.2";
   const dataRevisao = "17/02/2026";
-  const horaRevisao = "23:30";
+  const horaRevisao = "23:35";
 
   const token         = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id       = "7625668696";
@@ -99,7 +99,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // --- FONTE 2: Yahoo Finance (fallback) ---
     try {
       const r = await fetch(
-        `https://query1.finance.yahoo.com/v8/finance/chart/EURUSD=X?interval=15m&range=1d`,
+        `https://query1.finance.yahoo.com/v8/finance/chart/EURUSD=X?interval=15m&range=2d`,
         { signal: AbortSignal.timeout(4000) }
       );
       const d = await r.json();
@@ -129,7 +129,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   async function getYahooForex(yahooSymbol: string): Promise<any[] | null> {
     try {
       const r = await fetch(
-        `https://query1.finance.yahoo.com/v8/finance/chart/${yahooSymbol}?interval=15m&range=1d`,
+        `https://query1.finance.yahoo.com/v8/finance/chart/${yahooSymbol}?interval=15m&range=2d`,
         { signal: AbortSignal.timeout(4000) }
       );
       const d = await r.json();
