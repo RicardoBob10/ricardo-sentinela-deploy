@@ -2,18 +2,17 @@ import { VercelRequest, VercelResponse } from '@vercel/node';
 
 // =============================================================================
 // TRAVA ANTI-DUPLICIDADE — NC 92-01 [R1 CORRIGIDO]
-// Cache em escopo de módulo (persiste entre invocações warm no Vercel).
 // =============================================================================
 const cacheSinais: Record<string, number> = {};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // ===========================================================================
-  // CONFIGURAÇÃO DE IDENTIFICAÇÃO — VERSÃO 110
+  // CONFIGURAÇÃO DE IDENTIFICAÇÃO — VERSÃO 110.1
   // ===========================================================================
-  const versao      = "110";
+  const versao      = "110.1";
   const dataRevisao = "17/02/2026";
-  const horaRevisao = "22:00";
+  const horaRevisao = "23:30";
 
   const token         = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id       = "7625668696";
@@ -25,10 +24,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // ===========================================================================
   // FETCHER BTC — NC 91-01 [R2 CORRIGIDO]
-  // KuCoin retorna timestamp em SEGUNDOS → multiplicar por 1000 para ms.
   // ===========================================================================
   async function getBTC(): Promise<any[] | null> {
-    // --- FONTE 1: KuCoin ---
     try {
       const r = await fetch(
         `https://api.kucoin.com/api/v1/market/candles?symbol=BTC-USDT&type=15min`,
@@ -38,7 +35,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (d?.data && Array.isArray(d.data) && d.data.length > 0) {
         return d.data
           .map((v: any) => ({
-            t: Number(v[0]) * 1000, // KuCoin: segundos → ms
+            t: Number(v[0]) * 1000,
             o: parseFloat(v[1]),
             c: parseFloat(v[2]),
             h: parseFloat(v[3]),
@@ -48,7 +45,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     } catch (_) {}
 
-    // --- FONTE 2: Bybit (redundância NC 89-01) ---
     try {
       const r = await fetch(
         `https://api.bybit.com/v5/market/kline?category=spot&symbol=BTCUSDT&interval=15&limit=50`,
@@ -72,15 +68,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // ===========================================================================
-  // FETCHER FOREX GENÉRICO — MELHORIA V110
-  // Função unificada para buscar qualquer par Forex (TwelveData + Yahoo).
-  // Aplica-se a: EUR/USD, USD/JPY, GBP/USD, AUD/USD, USD/CAD, USD/CHF.
+  // FETCHER EUR/USD — NC 95-01 [R2 CORRIGIDO]
+  // ÚNICO par que usa TwelveData (evita estouro de quota free tier).
   // ===========================================================================
-  async function getForex(symbol: string, yahooSymbol: string): Promise<any[] | null> {
-    // --- FONTE 1: TwelveData ---
+  async function getEURUSD(): Promise<any[] | null> {
+    // --- FONTE 1: TwelveData (primário APENAS para EURUSD) ---
     try {
       const r = await fetch(
-        `https://api.twelvedata.com/time_series?symbol=${symbol}&interval=15min&outputsize=50&apikey=${twelveDataKey}`,
+        `https://api.twelvedata.com/time_series?symbol=EUR/USD&interval=15min&outputsize=50&apikey=${twelveDataKey}`,
         { signal: AbortSignal.timeout(4000) }
       );
       const d = await r.json();
@@ -101,10 +96,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     } catch (_) {}
 
-    // --- FONTE 2: Yahoo Finance (redundância) ---
+    // --- FONTE 2: Yahoo Finance (fallback) ---
     try {
       const r = await fetch(
-        `https://query1.finance.yahoo.com/v8/finance/chart/${yahooSymbol}?interval=15m&range=1d`,
+        `https://query1.finance.yahoo.com/v8/finance/chart/EURUSD=X?interval=15m&range=1d`,
         { signal: AbortSignal.timeout(4000) }
       );
       const d = await r.json();
@@ -112,7 +107,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (chart) {
         return chart.timestamp
           .map((t: number, i: number) => ({
-            t: t * 1000, // Yahoo retorna segundos → ms
+            t: t * 1000,
             c: chart.indicators.quote[0].close[i],
             h: chart.indicators.quote[0].high[i],
             l: chart.indicators.quote[0].low[i],
@@ -127,9 +122,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // ===========================================================================
-  // CONTROLE DE MERCADO FOREX — ITEM 10 ♦ (REGRA DE OURO)
-  // MELHORIA V110: Renomeada para mercadoForexAberto() (aplica-se a TODOS os pares).
-  // Seg-Qui 00:00-23:59 | Sex 00:00-19:00 | Dom 19:01-23:59 | Sáb FECHADO
+  // FETCHER YAHOO FOREX — MELHORIA V110.1
+  // Usa APENAS Yahoo Finance (sem TwelveData) para evitar estouro de quota.
+  // Aplica-se aos 5 novos pares: USDJPY, GBPUSD, AUDUSD, USDCAD, USDCHF.
+  // ===========================================================================
+  async function getYahooForex(yahooSymbol: string): Promise<any[] | null> {
+    try {
+      const r = await fetch(
+        `https://query1.finance.yahoo.com/v8/finance/chart/${yahooSymbol}?interval=15m&range=1d`,
+        { signal: AbortSignal.timeout(4000) }
+      );
+      const d = await r.json();
+      const chart = d?.chart?.result?.[0];
+      if (chart && chart.timestamp && chart.indicators?.quote?.[0]) {
+        return chart.timestamp
+          .map((t: number, i: number) => {
+            const quote = chart.indicators.quote[0];
+            return {
+              t: t * 1000,
+              c: quote.close?.[i],
+              h: quote.high?.[i],
+              l: quote.low?.[i],
+              o: quote.open?.[i],
+            };
+          })
+          .filter((v: any) => v.c != null && !isNaN(v.c) && !isNaN(v.t))
+          .sort((a: any, b: any) => a.t - b.t);
+      }
+    } catch (err) {
+      // Log do erro para debug (não bloqueia execução)
+      console.error(`[${yahooSymbol}] Yahoo fetch error:`, err);
+    }
+
+    return null;
+  }
+
+  // ===========================================================================
+  // CONTROLE DE MERCADO FOREX — Item 10 ♦ (REGRA DE OURO)
   // ===========================================================================
   function mercadoForexAberto(): boolean {
     const agora   = new Date(agoraUnix);
@@ -140,15 +169,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const dia      = diaSem.toLowerCase();
 
     if (dia.includes('segunda') || dia.includes('terça') || dia.includes('quarta') || dia.includes('quinta')) {
-      return true; // 00:00 às 23:59 ABERTO
+      return true;
     }
     if (dia.includes('sexta')) {
-      return minutos <= 19 * 60; // até 19:00 ABERTO
+      return minutos <= 19 * 60;
     }
     if (dia.includes('domingo')) {
-      return minutos >= 19 * 60 + 1; // de 19:01 em diante ABERTO
+      return minutos >= 19 * 60 + 1;
     }
-    return false; // Sábado: FECHADO
+    return false;
   }
 
   // ===========================================================================
@@ -199,8 +228,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // ===========================================================================
   // SELEÇÃO DA VELA FECHADA — NC 91-01 / 95-01 [R2 CORRIGIDO]
-  // Busca a última vela FECHADA com timestamp múltiplo de 15min dentro da
-  // janela de 40 segundos após o fechamento oficial.
   // ===========================================================================
   function selecionarVelaFechada(dados: any[]): { vela: any; idx: number } | null {
     const quinzeMin = 15 * 60 * 1000;
@@ -222,7 +249,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // ===========================================================================
   // NORMALIZAÇÃO DO ID DE VELA — NC 92-01 [R1 CORRIGIDO]
-  // Trunca o timestamp na janela de 15min para agrupar variações de ms.
   // ===========================================================================
   function normalizarIdVela(label: string, ts: number): string {
     const quinzeMin  = 15 * 60 * 1000;
@@ -231,35 +257,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // ===========================================================================
-  // PROCESSAMENTO PRINCIPAL — MELHORIA V110: 6 PARES FOREX + BITCOIN
+  // PROCESSAMENTO PRINCIPAL — V110.1: YAHOO EXCLUSIVO PARA 5 NOVOS PARES
   // ===========================================================================
   const logAtivos: string[] = [];
 
   const ativos = [
-    { label: "Bitcoin",  data: await getBTC(),                           prec: 2, isForex: false },
-    { label: "EURUSD",   data: await getForex("EUR/USD", "EURUSD=X"),   prec: 5, isForex: true  },
-    { label: "USDJPY",   data: await getForex("USD/JPY", "USDJPY=X"),   prec: 5, isForex: true  },
-    { label: "GBPUSD",   data: await getForex("GBP/USD", "GBPUSD=X"),   prec: 5, isForex: true  },
-    { label: "AUDUSD",   data: await getForex("AUD/USD", "AUDUSD=X"),   prec: 5, isForex: true  },
-    { label: "USDCAD",   data: await getForex("USD/CAD", "USDCAD=X"),   prec: 5, isForex: true  },
-    { label: "USDCHF",   data: await getForex("USD/CHF", "USDCHF=X"),   prec: 5, isForex: true  },
+    { label: "Bitcoin",  data: await getBTC(),                    prec: 2, isForex: false },
+    { label: "EURUSD",   data: await getEURUSD(),                 prec: 5, isForex: true  },
+    { label: "USDJPY",   data: await getYahooForex("USDJPY=X"),  prec: 5, isForex: true  },
+    { label: "GBPUSD",   data: await getYahooForex("GBPUSD=X"),  prec: 5, isForex: true  },
+    { label: "AUDUSD",   data: await getYahooForex("AUDUSD=X"),  prec: 5, isForex: true  },
+    { label: "USDCAD",   data: await getYahooForex("USDCAD=X"),  prec: 5, isForex: true  },
+    { label: "USDCHF",   data: await getYahooForex("USDCHF=X"),  prec: 5, isForex: true  },
   ];
 
   for (const ativo of ativos) {
 
-    // Verificação de dados mínimos
     if (!ativo.data || ativo.data.length < 30) {
-      logAtivos.push(`[${ativo.label}] ⚠️ Dados insuficientes ou API indisponível.`);
+      logAtivos.push(`[${ativo.label}] ⚠️ Dados insuficientes (${ativo.data?.length || 0} velas).`);
       continue;
     }
 
-    // Controle de mercado Forex (Item 10 ♦ — Regra de Ouro)
     if (ativo.isForex && !mercadoForexAberto()) {
-      logAtivos.push(`[${ativo.label}] 🔒 Mercado FOREX FECHADO — sinal bloqueado.`);
+      logAtivos.push(`[${ativo.label}] 🔒 Mercado FOREX FECHADO.`);
       continue;
     }
 
-    // Seleção de vela fechada (NC 91-01 / 95-01 corrigido)
     const resultado = selecionarVelaFechada(ativo.data);
     if (!resultado) {
       logAtivos.push(`[${ativo.label}] ⏳ Fora da janela de disparo (40s).`);
@@ -268,23 +291,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { vela, idx: i } = resultado;
 
-    // Guard Invalid Date (NC 91-02)
     const dataVela = new Date(vela.t);
     if (isNaN(dataVela.getTime())) {
-      logAtivos.push(`[${ativo.label}] ❌ Timestamp inválido (${vela.t}).`);
+      logAtivos.push(`[${ativo.label}] ❌ Timestamp inválido.`);
       continue;
     }
 
-    // Formatar VELA em HH:MM (Item 12 ♦ — Regra de Ouro)
     const tempoVelaStr = dataVela.toLocaleTimeString('pt-BR', optionsBR);
 
-    // Índice mínimo para cálculos técnicos
     if (i < 22) {
-      logAtivos.push(`[${ativo.label}] ⚠️ Dados insuficientes para EMA/RSI (idx ${i}).`);
+      logAtivos.push(`[${ativo.label}] ⚠️ Índice insuficiente para EMA/RSI (idx ${i}).`);
       continue;
     }
 
-    // Lógica RT_ROBO_SCALPER_V3: EMA 9/21 cruzamento + RSI 14 (Item 9 ♦)
     const ema9Atual  = calcEMA(ativo.data, 9,  i);
     const ema21Atual = calcEMA(ativo.data, 21, i);
     const ema9Prev   = calcEMA(ativo.data, 9,  i - 1);
@@ -302,20 +321,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       continue;
     }
 
-    // Trava de duplicidade normalizada (NC 92-01 [R1])
     const sinalId = normalizarIdVela(ativo.label, vela.t);
     if (cacheSinais[sinalId]) {
-      logAtivos.push(`[${ativo.label}] 🔁 Vela ${tempoVelaStr} já processada — duplicata bloqueada.`);
+      logAtivos.push(`[${ativo.label}] 🔁 Vela ${tempoVelaStr} já processada.`);
       continue;
     }
     cacheSinais[sinalId] = agoraUnix;
 
-    // ATR para TP e SL (Item 13 ♦ / 14 ♦ / 15 ♦ — Regra de Ouro)
     const atr = calcATR(ativo.data, i, 14);
-    const tp  = call ? vela.c + atr * 1.5 : vela.c - atr * 1.5; // Item 14 ♦
-    const sl  = call ? vela.c - atr * 2.0 : vela.c + atr * 2.0; // Item 15 ♦
+    const tp  = call ? vela.c + atr * 1.5 : vela.c - atr * 1.5;
+    const sl  = call ? vela.c - atr * 2.0 : vela.c + atr * 2.0;
 
-    // Mensagem Telegram (Item 12 ♦ — FORMATOS — NÃO ALTERAR)
     const msg =
       `${call ? "🟢" : "🔴"} <b>SINAL EMITIDO!</b>\n` +
       `<b>ATIVO:</b> ${ativo.label}\n` +
@@ -325,7 +341,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       `<b>TP:</b> $ ${tp.toFixed(ativo.prec)}\n` +
       `<b>SL:</b> $ ${sl.toFixed(ativo.prec)}`;
 
-    // Envio Telegram (NC 89-01 / 89-02)
     try {
       const tgRes  = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
         method:  'POST',
@@ -345,7 +360,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // ===========================================================================
   // INTERFACE HTML — Item 8 ♦ (REGRA DE OURO — NÃO ALTERAR)
-  // MELHORIA V110: Status agora mostra "FOREX" (aplica-se aos 6 pares).
   // ===========================================================================
   const statusForex = mercadoForexAberto() ? "ABERTO" : "FECHADO";
   const logHtml     = logAtivos.map(l => `<p>${l}</p>`).join('\n');
