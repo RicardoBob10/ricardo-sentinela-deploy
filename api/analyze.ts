@@ -8,11 +8,11 @@ const cacheSinais: Record<string, number> = {};
 export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // ===========================================================================
-  // CONFIGURAÇÃO DE IDENTIFICAÇÃO — VERSÃO 110.1
+  // CONFIGURAÇÃO DE IDENTIFICAÇÃO — VERSÃO 111
   // ===========================================================================
-  const versao      = "110.2";
-  const dataRevisao = "17/02/2026";
-  const horaRevisao = "23:35";
+  const versao      = "111";
+  const dataRevisao = "18/02/2026";
+  const horaRevisao = "00:00";
 
   const token         = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id       = "7625668696";
@@ -341,11 +341,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       `<b>TP:</b> $ ${tp.toFixed(ativo.prec)}\n` +
       `<b>SL:</b> $ ${sl.toFixed(ativo.prec)}`;
 
+    // --- Envio Telegram com botão EXECUTAR (MELHORIA V111) ---
     try {
       const tgRes  = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ chat_id, text: msg, parse_mode: 'HTML' }),
+        body:    JSON.stringify({ 
+          chat_id, 
+          text: msg, 
+          parse_mode: 'HTML',
+          reply_markup: {
+            inline_keyboard: [[
+              { 
+                text: '◯ EXECUTAR', 
+                callback_data: `exec_${ativo.label}_${call ? 'C' : 'V'}_${tp.toFixed(ativo.prec)}_${sl.toFixed(ativo.prec)}` 
+              }
+            ]]
+          }
+        }),
       });
       const tgData = await tgRes.json();
       if (!tgData.ok) {
