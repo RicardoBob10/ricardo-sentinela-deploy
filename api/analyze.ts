@@ -8,10 +8,10 @@ const cacheSinais: Record<string, number> = {};
 export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // ===========================================================================
-  // CONFIGURAÇÃO DE IDENTIFICAÇÃO — VERSÃO 111
+  // CONFIGURAÇÃO DE IDENTIFICAÇÃO — VERSÃO 112
   // ===========================================================================
-  const versao      = "111";
-  const dataRevisao = "18/02/2026";
+  const versao      = "112";
+  const dataRevisao = "21/02/2026";
   const horaRevisao = "00:00";
 
   const token         = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
@@ -72,7 +72,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // ÚNICO par que usa TwelveData (evita estouro de quota free tier).
   // ===========================================================================
   async function getEURUSD(): Promise<any[] | null> {
-    // --- FONTE 1: TwelveData (primário APENAS para EURUSD) ---
     try {
       const r = await fetch(
         `https://api.twelvedata.com/time_series?symbol=EUR/USD&interval=15min&outputsize=50&apikey=${twelveDataKey}`,
@@ -96,7 +95,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     } catch (_) {}
 
-    // --- FONTE 2: Yahoo Finance (fallback) ---
     try {
       const r = await fetch(
         `https://query1.finance.yahoo.com/v8/finance/chart/EURUSD=X?interval=15m&range=2d`,
@@ -150,7 +148,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .sort((a: any, b: any) => a.t - b.t);
       }
     } catch (err) {
-      // Log do erro para debug (não bloqueia execução)
       console.error(`[${yahooSymbol}] Yahoo fetch error:`, err);
     }
 
@@ -257,7 +254,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // ===========================================================================
-  // PROCESSAMENTO PRINCIPAL — V110.1: YAHOO EXCLUSIVO PARA 5 NOVOS PARES
+  // PROCESSAMENTO PRINCIPAL
   // ===========================================================================
   const logAtivos: string[] = [];
 
@@ -341,20 +338,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       `<b>TP:</b> $ ${tp.toFixed(ativo.prec)}\n` +
       `<b>SL:</b> $ ${sl.toFixed(ativo.prec)}`;
 
-    // --- Envio Telegram com botão EXECUTAR (MELHORIA V111) ---
+    // =========================================================================
+    // MELHORIA V112 — callback_data inclui PREÇO DE ENTRADA (vela.c)
+    // Formato: exec_ATIVO_TIPO_PRECO_TP_SL
+    // O sentinela.js usa o preço para converter TP/SL de cotação → USD
+    // =========================================================================
     try {
       const tgRes  = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ 
-          chat_id, 
-          text: msg, 
+        body:    JSON.stringify({
+          chat_id,
+          text: msg,
           parse_mode: 'HTML',
           reply_markup: {
             inline_keyboard: [[
-              { 
-                text: '◯ EXECUTAR', 
-                callback_data: `exec_${ativo.label}_${call ? 'C' : 'V'}_${tp.toFixed(ativo.prec)}_${sl.toFixed(ativo.prec)}` 
+              {
+                text: '◯ EXECUTAR',
+                callback_data: `exec_${ativo.label}_${call ? 'C' : 'V'}_${vela.c.toFixed(ativo.prec)}_${tp.toFixed(ativo.prec)}_${sl.toFixed(ativo.prec)}`
               }
             ]]
           }
