@@ -12,7 +12,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // ===========================================================================
   const versao      = "112";
   const dataRevisao = "21/02/2026";
-  const horaRevisao = "00:00";
+  const horaRevisao = "08:31";
 
   const token         = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id       = "7625668696";
