@@ -12,7 +12,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // ===========================================================================
   const versao      = "115";
   const dataRevisao = "21/02/2026";
-  const horaRevisao = "15:03";
+  const horaRevisao = "15:16";
 
   const token         = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id       = "7625668696";
@@ -29,7 +29,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // ===========================================================================
   async function getBTC(): Promise<any[] | null> {
     try {
-      const r = await fetch(`https://api.kucoin.com/api/v1/market/candles?symbol=BTC-USDT&type=15min`, { signal: AbortSignal.timeout(4000) });
+      // startAt: 500 candles de 15min atrás = 500 * 900s = 450.000s
+      const endAt   = Math.floor(Date.now() / 1000);
+      const startAt = endAt - 500 * 900;
+      const r = await fetch(`https://api.kucoin.com/api/v1/market/candles?symbol=BTC-USDT&type=15min&startAt=${startAt}&endAt=${endAt}`, { signal: AbortSignal.timeout(4000) });
       const d = await r.json();
       if (d?.data && Array.isArray(d.data) && d.data.length > 0) {
         return d.data
@@ -45,7 +48,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     } catch (_) {}
     try {
-      const r = await fetch(`https://api.bybit.com/v5/market/kline?category=spot&symbol=BTCUSDT&interval=15&limit=200`, { signal: AbortSignal.timeout(4000) });
+      const r = await fetch(`https://api.bybit.com/v5/market/kline?category=spot&symbol=BTCUSDT&interval=15&limit=500`, { signal: AbortSignal.timeout(4000) });
       const d = await r.json();
       if (d?.result?.list && Array.isArray(d.result.list)) {
         return d.result.list
@@ -68,7 +71,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // ===========================================================================
   async function getEURUSD(): Promise<any[] | null> {
     try {
-      const r = await fetch(`https://api.twelvedata.com/time_series?symbol=EUR/USD&interval=15min&outputsize=200&apikey=${twelveDataKey}`, { signal: AbortSignal.timeout(4000) });
+      const r = await fetch(`https://api.twelvedata.com/time_series?symbol=EUR/USD&interval=15min&outputsize=500&apikey=${twelveDataKey}`, { signal: AbortSignal.timeout(4000) });
       const d = await r.json();
       if (d?.values && Array.isArray(d.values) && d.values.length > 0) {
         return d.values
@@ -78,7 +81,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     } catch (_) {}
     try {
-      const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/EURUSD=X?interval=15m&range=5d`, { signal: AbortSignal.timeout(4000) });
+      const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/EURUSD=X?interval=15m&range=60d`, { signal: AbortSignal.timeout(4000) });
       const d = await r.json();
       const chart = d?.chart?.result?.[0];
       if (chart) {
@@ -97,7 +100,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // ===========================================================================
   async function getYahooForex(yahooSymbol: string, tdSymbol: string): Promise<any[] | null> {
     try {
-      const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${yahooSymbol}?interval=15m&range=5d`, { signal: AbortSignal.timeout(4000) });
+      const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${yahooSymbol}?interval=15m&range=60d`, { signal: AbortSignal.timeout(4000) });
       const d = await r.json();
       const chart = d?.chart?.result?.[0];
       if (chart && chart.timestamp && chart.indicators?.quote?.[0]) {
@@ -108,7 +111,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     } catch (_) {}
     try {
-      const r = await fetch(`https://api.twelvedata.com/time_series?symbol=${tdSymbol}&interval=15min&outputsize=200&apikey=${twelveDataKey}`, { signal: AbortSignal.timeout(4000) });
+      const r = await fetch(`https://api.twelvedata.com/time_series?symbol=${tdSymbol}&interval=15min&outputsize=500&apikey=${twelveDataKey}`, { signal: AbortSignal.timeout(4000) });
       const d = await r.json();
       if (d?.values && Array.isArray(d.values) && d.values.length > 0) {
         return d.values
