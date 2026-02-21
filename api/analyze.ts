@@ -10,9 +10,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // ===========================================================================
   // CONFIGURAÇÃO DE IDENTIFICAÇÃO — VERSÃO 112
   // ===========================================================================
-  const versao      = "112";
+  const versao      = "114";
   const dataRevisao = "21/02/2026";
-  const horaRevisao = "08:54";
+  const horaRevisao = "13:48";
 
   const token         = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id       = "7625668696";
@@ -59,7 +59,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return null;
   }
 
-  async function getYahooForex(yahooSymbol: string): Promise<any[] | null> {
+  async function getYahooForex(yahooSymbol: string, tdSymbol: string): Promise<any[] | null> {
+    // Fonte 1: Yahoo Finance
     try {
       const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${yahooSymbol}?interval=15m&range=2d`, { signal: AbortSignal.timeout(4000) });
       const d = await r.json();
@@ -67,7 +68,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (chart && chart.timestamp && chart.indicators?.quote?.[0]) {
         return chart.timestamp.map((t: number, i: number) => { const quote = chart.indicators.quote[0]; return { t: t * 1000, c: quote.close?.[i], h: quote.high?.[i], l: quote.low?.[i], o: quote.open?.[i] }; }).filter((v: any) => v.c != null && !isNaN(v.c) && !isNaN(v.t)).sort((a: any, b: any) => a.t - b.t);
       }
-    } catch (err) { console.error(`[${yahooSymbol}] Yahoo fetch error:`, err); }
+    } catch (_) {}
+    // Fonte 2: TwelveData (fallback — V114)
+    try {
+      const r = await fetch(`https://api.twelvedata.com/time_series?symbol=${tdSymbol}&interval=15min&outputsize=50&apikey=${twelveDataKey}`, { signal: AbortSignal.timeout(4000) });
+      const d = await r.json();
+      if (d?.values && Array.isArray(d.values) && d.values.length > 0) {
+        return d.values.map((v: any) => { const ts = new Date(v.datetime + 'Z').getTime(); return { t: isNaN(ts) ? new Date(v.datetime).getTime() : ts, c: parseFloat(v.close), h: parseFloat(v.high), l: parseFloat(v.low), o: parseFloat(v.open) }; }).filter((v: any) => !isNaN(v.t)).sort((a: any, b: any) => a.t - b.t);
+      }
+    } catch (_) {}
     return null;
   }
 
@@ -139,11 +148,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const ativos = [
     { label: "Bitcoin", data: await getBTC(),                   prec: 2, isForex: false },
     { label: "EURUSD",  data: await getEURUSD(),                prec: 5, isForex: true  },
-    { label: "USDJPY",  data: await getYahooForex("USDJPY=X"), prec: 5, isForex: true  },
-    { label: "GBPUSD",  data: await getYahooForex("GBPUSD=X"), prec: 5, isForex: true  },
-    { label: "AUDUSD",  data: await getYahooForex("AUDUSD=X"), prec: 5, isForex: true  },
-    { label: "USDCAD",  data: await getYahooForex("USDCAD=X"), prec: 5, isForex: true  },
-    { label: "USDCHF",  data: await getYahooForex("USDCHF=X"), prec: 5, isForex: true  },
+    { label: "USDJPY",  data: await getYahooForex("USDJPY=X", "USD/JPY"), prec: 5, isForex: true  },
+    { label: "GBPUSD",  data: await getYahooForex("GBPUSD=X", "GBP/USD"), prec: 5, isForex: true  },
+    { label: "AUDUSD",  data: await getYahooForex("AUDUSD=X", "AUD/USD"), prec: 5, isForex: true  },
+    { label: "USDCAD",  data: await getYahooForex("USDCAD=X", "USD/CAD"), prec: 5, isForex: true  },
+    { label: "USDCHF",  data: await getYahooForex("USDCHF=X", "USD/CHF"), prec: 5, isForex: true  },
   ];
 
   for (const ativo of ativos) {
