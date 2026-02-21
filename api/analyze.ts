@@ -1,4 +1,5 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
+import WebSocket from 'ws';
 
 // =============================================================================
 // TRAVA ANTI-DUPLICIDADE — NC 92-01 [R1 CORRIGIDO]
@@ -8,73 +9,104 @@ const cacheSinais: Record<string, number> = {};
 export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // ===========================================================================
-  // CONFIGURAÇÃO DE IDENTIFICAÇÃO — VERSÃO 112
+  // CONFIGURAÇÃO DE IDENTIFICAÇÃO — VERSÃO 113
   // ===========================================================================
-  const versao      = "112";
+  const versao      = "113";
   const dataRevisao = "21/02/2026";
-  const horaRevisao = "08:54";
+  const horaRevisao = "13:42";
 
-  const token         = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
-  const chat_id       = "7625668696";
-  const twelveDataKey = "e36e4f3a97124f5c9e2b1d3f5a7c9e1b";
+  const token   = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
+  const chat_id = "7625668696";
 
   const agoraUnix = Date.now();
   const optionsBR = { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false } as const;
   const horaBR    = new Date(agoraUnix).toLocaleTimeString('pt-BR', optionsBR);
 
-  async function getBTC(): Promise<any[] | null> {
-    try {
-      const r = await fetch(`https://api.kucoin.com/api/v1/market/candles?symbol=BTC-USDT&type=15min`, { signal: AbortSignal.timeout(3500) });
-      const d = await r.json();
-      if (d?.data && Array.isArray(d.data) && d.data.length > 0) {
-        return d.data.map((v: any) => ({ t: Number(v[0]) * 1000, o: parseFloat(v[1]), c: parseFloat(v[2]), h: parseFloat(v[3]), l: parseFloat(v[4]) })).sort((a: any, b: any) => a.t - b.t);
+  // ===========================================================================
+  // FETCHER DERIV — única fonte de dados para todos os ativos
+  // Substitui: KuCoin, Bybit, TwelveData, Yahoo Finance
+  //
+  // Vantagem: preços idênticos ao que o sentinela.js executa na Deriv.
+  // Zero divergência entre sinal e execução.
+  //
+  // Símbolo Deriv:
+  //   Bitcoin → cryBTCUSD
+  //   EURUSD  → frxEURUSD
+  //   USDJPY  → frxUSDJPY
+  //   GBPUSD  → frxGBPUSD
+  //   AUDUSD  → frxAUDUSD
+  //   USDCAD  → frxUSDCAD
+  //   USDCHF  → frxUSDCHF
+  // ===========================================================================
+  async function getDerivCandles(symbol: string, count: number = 50): Promise<any[] | null> {
+    return new Promise((resolve) => {
+      let ws: WebSocket;
+      try {
+        ws = new WebSocket('wss://ws.binaryws.com/websockets/v3?app_id=1');
+      } catch (_) {
+        return resolve(null);
       }
-    } catch (_) {}
-    try {
-      const r = await fetch(`https://api.bybit.com/v5/market/kline?category=spot&symbol=BTCUSDT&interval=15&limit=50`, { signal: AbortSignal.timeout(3500) });
-      const d = await r.json();
-      if (d?.result?.list && Array.isArray(d.result.list)) {
-        return d.result.list.map((v: any) => ({ t: Number(v[0]), o: parseFloat(v[1]), h: parseFloat(v[2]), l: parseFloat(v[3]), c: parseFloat(v[4]) })).sort((a: any, b: any) => a.t - b.t);
-      }
-    } catch (_) {}
-    return null;
+
+      const timeout = setTimeout(() => {
+        try { ws.close(); } catch (_) {}
+        resolve(null);
+      }, 8000);
+
+      ws.on('open', () => {
+        ws.send(JSON.stringify({
+          ticks_history: symbol,
+          count,
+          end        : 'latest',
+          granularity: 900,       // 15 minutos em segundos
+          style      : 'candles',
+        }));
+      });
+
+      ws.on('message', (raw: Buffer) => {
+        try {
+          const msg = JSON.parse(raw.toString());
+
+          if (msg.error) {
+            clearTimeout(timeout);
+            ws.close();
+            console.error(`[DERIV] Erro ${symbol}: ${msg.error.message}`);
+            return resolve(null);
+          }
+
+          if (msg.msg_type === 'candles' && Array.isArray(msg.candles)) {
+            clearTimeout(timeout);
+            ws.close();
+            const candles = msg.candles
+              .map((c: any) => ({
+                t: c.epoch * 1000,
+                o: parseFloat(c.open),
+                h: parseFloat(c.high),
+                l: parseFloat(c.low),
+                c: parseFloat(c.close),
+              }))
+              .sort((a: any, b: any) => a.t - b.t);
+            resolve(candles.length > 0 ? candles : null);
+          }
+        } catch (_) {
+          clearTimeout(timeout);
+          try { ws.close(); } catch (_) {}
+          resolve(null);
+        }
+      });
+
+      ws.on('error', () => {
+        clearTimeout(timeout);
+        resolve(null);
+      });
+    });
   }
 
-  async function getEURUSD(): Promise<any[] | null> {
-    try {
-      const r = await fetch(`https://api.twelvedata.com/time_series?symbol=EUR/USD&interval=15min&outputsize=50&apikey=${twelveDataKey}`, { signal: AbortSignal.timeout(4000) });
-      const d = await r.json();
-      if (d?.values && Array.isArray(d.values) && d.values.length > 0) {
-        return d.values.map((v: any) => { const ts = new Date(v.datetime + 'Z').getTime(); return { t: isNaN(ts) ? new Date(v.datetime).getTime() : ts, c: parseFloat(v.close), h: parseFloat(v.high), l: parseFloat(v.low), o: parseFloat(v.open) }; }).filter((v: any) => !isNaN(v.t)).sort((a: any, b: any) => a.t - b.t);
-      }
-    } catch (_) {}
-    try {
-      const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/EURUSD=X?interval=15m&range=2d`, { signal: AbortSignal.timeout(4000) });
-      const d = await r.json();
-      const chart = d?.chart?.result?.[0];
-      if (chart) {
-        return chart.timestamp.map((t: number, i: number) => ({ t: t * 1000, c: chart.indicators.quote[0].close[i], h: chart.indicators.quote[0].high[i], l: chart.indicators.quote[0].low[i], o: chart.indicators.quote[0].open[i] })).filter((v: any) => v.c != null && !isNaN(v.c)).sort((a: any, b: any) => a.t - b.t);
-      }
-    } catch (_) {}
-    return null;
-  }
-
-  async function getYahooForex(yahooSymbol: string): Promise<any[] | null> {
-    try {
-      const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${yahooSymbol}?interval=15m&range=2d`, { signal: AbortSignal.timeout(4000) });
-      const d = await r.json();
-      const chart = d?.chart?.result?.[0];
-      if (chart && chart.timestamp && chart.indicators?.quote?.[0]) {
-        return chart.timestamp.map((t: number, i: number) => { const quote = chart.indicators.quote[0]; return { t: t * 1000, c: quote.close?.[i], h: quote.high?.[i], l: quote.low?.[i], o: quote.open?.[i] }; }).filter((v: any) => v.c != null && !isNaN(v.c) && !isNaN(v.t)).sort((a: any, b: any) => a.t - b.t);
-      }
-    } catch (err) { console.error(`[${yahooSymbol}] Yahoo fetch error:`, err); }
-    return null;
-  }
-
+  // ===========================================================================
+  // CONTROLE DE MERCADO FOREX — Item 10 ♦ (REGRA DE OURO)
+  // ===========================================================================
   function mercadoForexAberto(): boolean {
-    const agora  = new Date(agoraUnix);
-    const diaSem = agora.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo', weekday: 'long' });
-    const hStr   = agora.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false });
+    const diaSem = new Date(agoraUnix).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo', weekday: 'long' });
+    const hStr   = new Date(agoraUnix).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false });
     const [hh, mm] = hStr.split(':').map(Number);
     const minutos  = hh * 60 + mm;
     const dia      = diaSem.toLowerCase();
@@ -84,6 +116,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return false;
   }
 
+  // ===========================================================================
+  // CÁLCULO EMA — Item 9 ♦ RT_ROBO_SCALPER_V3 (REGRA DE OURO)
+  // ===========================================================================
   function calcEMA(dados: any[], periodo: number, ate: number): number {
     const k = 2 / (periodo + 1);
     let ema = dados[0].c;
@@ -91,6 +126,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return ema;
   }
 
+  // ===========================================================================
+  // CÁLCULO RSI 14 — Item 9 ♦ RT_ROBO_SCALPER_V3 (REGRA DE OURO)
+  // ===========================================================================
   function calcRSI(dados: any[], ate: number, periodo: number = 14): number {
     let ganhos = 0, perdas = 0;
     const inicio = ate - periodo;
@@ -105,6 +143,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return 100 - 100 / (1 + mediaG / mediaP);
   }
 
+  // ===========================================================================
+  // CÁLCULO ATR — Item 13 ♦ LÓGICA DE CÁLCULO TP E SL VIA ATR (REGRA DE OURO)
+  // ===========================================================================
   function calcATR(dados: any[], ate: number, periodo: number = 14): number {
     let trSoma = 0;
     for (let j = ate - periodo + 1; j <= ate; j++) {
@@ -114,6 +155,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return trSoma / periodo;
   }
 
+  // ===========================================================================
+  // SELEÇÃO DA VELA FECHADA — NC 91-01 / 95-01 [R2 CORRIGIDO]
+  // ===========================================================================
   function selecionarVelaFechada(dados: any[]): { vela: any; idx: number } | null {
     const quinzeMin = 15 * 60 * 1000;
     for (let i = dados.length - 1; i >= 1; i--) {
@@ -128,25 +172,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return null;
   }
 
+  // ===========================================================================
+  // NORMALIZAÇÃO DO ID DE VELA — NC 92-01 [R1 CORRIGIDO]
+  // ===========================================================================
   function normalizarIdVela(label: string, ts: number): string {
     const quinzeMin  = 15 * 60 * 1000;
     const janelaNorm = Math.floor(ts / quinzeMin) * quinzeMin;
     return `${label}_${janelaNorm}`;
   }
 
+  // ===========================================================================
+  // PROCESSAMENTO PRINCIPAL — V113: DERIV COMO ÚNICA FONTE DE DADOS
+  // Todos os 7 ativos buscam candles diretamente da Deriv em paralelo.
+  // ===========================================================================
   const logAtivos: string[] = [];
 
   const ativos = [
-    { label: "Bitcoin", data: await getBTC(),                   prec: 2, isForex: false },
-    { label: "EURUSD",  data: await getEURUSD(),                prec: 5, isForex: true  },
-    { label: "USDJPY",  data: await getYahooForex("USDJPY=X"), prec: 5, isForex: true  },
-    { label: "GBPUSD",  data: await getYahooForex("GBPUSD=X"), prec: 5, isForex: true  },
-    { label: "AUDUSD",  data: await getYahooForex("AUDUSD=X"), prec: 5, isForex: true  },
-    { label: "USDCAD",  data: await getYahooForex("USDCAD=X"), prec: 5, isForex: true  },
-    { label: "USDCHF",  data: await getYahooForex("USDCHF=X"), prec: 5, isForex: true  },
+    { label: "Bitcoin", symbol: "cryBTCUSD", prec: 2, isForex: false },
+    { label: "EURUSD",  symbol: "frxEURUSD",  prec: 5, isForex: true  },
+    { label: "USDJPY",  symbol: "frxUSDJPY",  prec: 5, isForex: true  },
+    { label: "GBPUSD",  symbol: "frxGBPUSD",  prec: 5, isForex: true  },
+    { label: "AUDUSD",  symbol: "frxAUDUSD",  prec: 5, isForex: true  },
+    { label: "USDCAD",  symbol: "frxUSDCAD",  prec: 5, isForex: true  },
+    { label: "USDCHF",  symbol: "frxUSDCHF",  prec: 5, isForex: true  },
   ];
 
-  for (const ativo of ativos) {
+  // Busca todos os ativos em paralelo para reduzir tempo de execução
+  const ativosComDados = await Promise.all(
+    ativos.map(async (a) => ({ ...a, data: await getDerivCandles(a.symbol) }))
+  );
+
+  for (const ativo of ativosComDados) {
 
     if (!ativo.data || ativo.data.length < 30) {
       logAtivos.push(`[${ativo.label}] ⚠️ Dados insuficientes (${ativo.data?.length || 0} velas).`);
@@ -201,11 +257,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       `<b>TP:</b> $ ${tp.toFixed(ativo.prec)}\n` +
       `<b>SL:</b> $ ${sl.toFixed(ativo.prec)}`;
 
-    // =========================================================================
-    // V112 — callback_data inclui PREÇO DE ENTRADA (vela.c)
-    // Formato: exec_ATIVO_TIPO_PRECO_TP_SL
-    // sentinela.js usa o preço para converter TP/SL de cotação → USD
-    // =========================================================================
+    // callback_data formato V112+: exec_ATIVO_TIPO_PRECO_TP_SL
     try {
       const tgRes  = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
         method:  'POST',
@@ -269,6 +321,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       <p>&nbsp;</p>
       <p><b>HORA ATUAL (BRT):</b> ${horaBR}</p>
       <p><b>MERCADO FOREX:</b> <span class="${statusForex === 'ABERTO' ? 'verde' : 'vermelho'}">${statusForex}</span></p>
+      <p><b>FONTE DE DADOS:</b> <span class="verde">Deriv API (exclusiva)</span></p>
       <p><b>ATIVOS MONITORADOS:</b> Bitcoin, EURUSD, USDJPY, GBPUSD, AUDUSD, USDCAD, USDCHF (7 ativos)</p>
       <div>__________________________________________________________________</div>
       <div class="log">
