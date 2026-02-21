@@ -10,9 +10,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // ===========================================================================
   // CONFIGURAÇÃO DE IDENTIFICAÇÃO — VERSÃO 115
   // ===========================================================================
-  const versao      = "116";
+  const versao      = "117";
   const dataRevisao = "21/02/2026";
-  const horaRevisao = "16:58";
+  const horaRevisao = "17:14";
 
   const token         = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id       = "7625668696";
@@ -492,7 +492,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       `<b>VELA:</b> ${tempoVelaStr}\n` +
       `<b>PREÇO:</b> $ ${vela.c.toFixed(ativo.prec)}`;
 
-    // callback_data V116: exec_ATIVO_TIPO_PRECO (TP/SL calculado pelo sentinela via stake)
+    // callback_data V117: exec_ATIVO_TIPO_PRECO_ATR (sentinela converte ATR → USD via stake)
     try {
       const tgRes  = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
         method:  'POST',
@@ -505,7 +505,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             inline_keyboard: [[
               {
                 text: '◯ EXECUTAR',
-                callback_data: `exec_${ativo.label}_${call ? 'C' : 'V'}_${vela.c.toFixed(ativo.prec)}`
+                callback_data: `exec_${ativo.label}_${call ? 'C' : 'V'}_${vela.c.toFixed(ativo.prec)}_${atr.toFixed(ativo.prec)}`
               }
             ]]
           }
