@@ -10,9 +10,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // ===========================================================================
   // CONFIGURAÇÃO DE IDENTIFICAÇÃO — VERSÃO 115
   // ===========================================================================
-  const versao      = "115";
+  const versao      = "116";
   const dataRevisao = "21/02/2026";
-  const horaRevisao = "15:16";
+  const horaRevisao = "16:58";
 
   const token         = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id       = "7625668696";
@@ -490,12 +490,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       `<b>ATIVO:</b> ${ativo.label}\n` +
       `<b>SINAL:</b> ${call ? "↑ COMPRAR" : "↓ VENDER"}\n` +
       `<b>VELA:</b> ${tempoVelaStr}\n` +
-      `<b>PREÇO:</b> $ ${vela.c.toFixed(ativo.prec)}\n` +
-      `<b>TP:</b> $ ${tp.toFixed(ativo.prec)}\n` +
-      `<b>SL:</b> $ ${sl.toFixed(ativo.prec)}\n` +
-      ``;  // score fica apenas no log
+      `<b>PREÇO:</b> $ ${vela.c.toFixed(ativo.prec)}`;
 
-    // callback_data V112+: exec_ATIVO_TIPO_PRECO_TP_SL
+    // callback_data V116: exec_ATIVO_TIPO_PRECO (TP/SL calculado pelo sentinela via stake)
     try {
       const tgRes  = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
         method:  'POST',
@@ -508,7 +505,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             inline_keyboard: [[
               {
                 text: '◯ EXECUTAR',
-                callback_data: `exec_${ativo.label}_${call ? 'C' : 'V'}_${vela.c.toFixed(ativo.prec)}_${tp.toFixed(ativo.prec)}_${sl.toFixed(ativo.prec)}`
+                callback_data: `exec_${ativo.label}_${call ? 'C' : 'V'}_${vela.c.toFixed(ativo.prec)}`
               }
             ]]
           }
