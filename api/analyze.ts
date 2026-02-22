@@ -8,11 +8,11 @@ const cacheSinais: Record<string, number> = {};
 export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // ===========================================================================
-  // CONFIGURAÇÃO DE IDENTIFICAÇÃO — VERSÃO 119
+  // CONFIGURAÇÃO DE IDENTIFICAÇÃO — VERSÃO 121
   // ===========================================================================
-  const versao      = "120";
+  const versao      = "121";
   const dataRevisao = "22/02/2026";
-  const horaRevisao = "12:10";
+  const horaRevisao = "19:30";
 
   const token         = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id       = "7625668696";
@@ -241,10 +241,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const [hh, mm] = hStr.split(':').map(Number);
     const minutos  = hh * 60 + mm;
     const dia      = diaSem.toLowerCase();
+    
+    // V121: Novos horários FOREX
+    // Segunda-feira → 00:00 às 23:59
+    // Terça-feira → 00:00 às 23:59
+    // Quarta-feira → 00:00 às 23:59
+    // Quinta-feira → 00:00 às 23:59
+    // Sexta-feira → 00:00 às 17:00
+    // Domingo → 21:00 às 00:00
+    // Fechado: Sexta (17:01-23:59), Sábado (todo dia), Domingo (00:00-20:59)
+    
     if (dia.includes('segunda') || dia.includes('terça') || dia.includes('quarta') || dia.includes('quinta')) return true;
-    if (dia.includes('sexta'))   return minutos <= 19 * 60;
-    if (dia.includes('domingo')) return minutos >= 19 * 60 + 1;
-    return false;
+    if (dia.includes('sexta'))   return minutos <= 17 * 60;  // Até 17:00 (nova mudança)
+    if (dia.includes('domingo')) return minutos >= 21 * 60;  // A partir de 21:00 (nova mudança)
+    return false;  // Sábado sempre fechado
   }
 
   function calcEMA(dados: any[], periodo: number, ate: number): number {
