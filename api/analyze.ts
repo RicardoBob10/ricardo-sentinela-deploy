@@ -8,11 +8,11 @@ const cacheSinais: Record<string, number> = {};
 export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // ===========================================================================
-  // CONFIGURAÇÃO DE IDENTIFICAÇÃO — VERSÃO 120.1 (COM ETHEREUM)
+  // CONFIGURAÇÃO DE IDENTIFICAÇÃO — VERSÃO 119
   // ===========================================================================
-  const versao      = "120.1";
+  const versao      = "120";
   const dataRevisao = "22/02/2026";
-  const horaRevisao = "15:45";
+  const horaRevisao = "12:10";
 
   const token         = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id       = "7625668696";
@@ -64,7 +64,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // ===========================================================================
-  // FETCHER ETH — KuCoin (principal) + Bybit (fallback) [V120.1 NOVO]
+  // FETCHER EUR/USD — TwelveData (principal) + Yahoo Finance (fallback)
+  // ===========================================================================
+  async function getEURUSD(): Promise<any[] | null> {
+    try {
+      const r = await fetch(`https://api.twelvedata.com/time_series?symbol=EUR/USD&interval=15min&outputsize=500&apikey=${twelveDataKey}`, { signal: AbortSignal.timeout(4000) });
+      const d = await r.json();
+      if (d?.values && Array.isArray(d.values) && d.values.length > 0) {
+        return d.values
+          .map((v: any) => { const ts = new Date(v.datetime + 'Z').getTime(); return { t: isNaN(ts) ? new Date(v.datetime).getTime() : ts, c: parseFloat(v.close), h: parseFloat(v.high), l: parseFloat(v.low), o: parseFloat(v.open), v: 0 }; })
+          .filter((v: any) => !isNaN(v.t))
+          .sort((a: any, b: any) => a.t - b.t);
+      }
+    } catch (_) {}
+    try {
+      const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/EURUSD=X?interval=15m&range=60d`, { signal: AbortSignal.timeout(4000) });
+      const d = await r.json();
+      const chart = d?.chart?.result?.[0];
+      if (chart) {
+        return chart.timestamp
+          .map((t: number, i: number) => ({ t: t * 1000, c: chart.indicators.quote[0].close[i], h: chart.indicators.quote[0].high[i], l: chart.indicators.quote[0].low[i], o: chart.indicators.quote[0].open[i], v: 0 }))
+          .filter((v: any) => v.c != null && !isNaN(v.c))
+          .sort((a: any, b: any) => a.t - b.t);
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  // ===========================================================================
+  // FETCHER ETH — KuCoin (principal) + Bybit (fallback) [V121 NOVO]
   // ===========================================================================
   async function getETH(): Promise<any[] | null> {
     try {
@@ -105,34 +133,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // ===========================================================================
-  // FETCHER EUR/USD — TwelveData (principal) + Yahoo Finance (fallback)
-  // ===========================================================================
-  async function getEURUSD(): Promise<any[] | null> {
-    try {
-      const r = await fetch(`https://api.twelvedata.com/time_series?symbol=EUR/USD&interval=15min&outputsize=500&apikey=${twelveDataKey}`, { signal: AbortSignal.timeout(4000) });
-      const d = await r.json();
-      if (d?.values && Array.isArray(d.values) && d.values.length > 0) {
-        return d.values
-          .map((v: any) => { const ts = new Date(v.datetime + 'Z').getTime(); return { t: isNaN(ts) ? new Date(v.datetime).getTime() : ts, c: parseFloat(v.close), h: parseFloat(v.high), l: parseFloat(v.low), o: parseFloat(v.open), v: 0 }; })
-          .filter((v: any) => !isNaN(v.t))
-          .sort((a: any, b: any) => a.t - b.t);
-      }
-    } catch (_) {}
-    try {
-      const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/EURUSD=X?interval=15m&range=60d`, { signal: AbortSignal.timeout(4000) });
-      const d = await r.json();
-      const chart = d?.chart?.result?.[0];
-      if (chart) {
-        return chart.timestamp
-          .map((t: number, i: number) => ({ t: t * 1000, c: chart.indicators.quote[0].close[i], h: chart.indicators.quote[0].high[i], l: chart.indicators.quote[0].low[i], o: chart.indicators.quote[0].open[i], v: 0 }))
-          .filter((v: any) => v.c != null && !isNaN(v.c))
-          .sort((a: any, b: any) => a.t - b.t);
-      }
-    } catch (_) {}
-    return null;
-  }
-
-  // ===========================================================================
   // FETCHER GENÉRICO FOREX — TwelveData (principal) + Yahoo (fallback)
   // ===========================================================================
   async function getYahooForex(yahooSymbol: string, tdSymbol: string): Promise<any[] | null> {
@@ -162,7 +162,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const MOEDAS_POR_ATIVO: Record<string, string[]> = {
     'Bitcoin' : ['USD'],
-    'Ethereum': ['USD'],      // V120.1 NOVO
+    'Ethereum': ['USD'],       // V121 NOVO
     'EURUSD'  : ['EUR', 'USD'],
     'USDJPY'  : ['USD', 'JPY'],
     'GBPUSD'  : ['GBP', 'USD'],
@@ -175,7 +175,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Usado para rastreabilidade: ID = PREFIXO + YYMMDDHHMM
   const PREFIXO_ID_POR_ATIVO: Record<string, string> = {
     'Bitcoin' : 'BTC',
-    'Ethereum': 'ETH',        // V120.1 NOVO
+    'Ethereum': 'ETH',        // V121 NOVO - FIX para problema de NaN
     'EURUSD'  : 'EUR',
     'USDJPY'  : 'JPY',
     'GBPUSD'  : 'GBP',
@@ -184,21 +184,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     'USDCHF'  : 'CHF',
   };
 
-  // ← V119 NOVO: Função para gerar ID com rastreabilidade
+  // ← V121 CORRIGIDA: Função para gerar ID com rastreabilidade (SEM NaN)
   // Formato: PREFIXO + YYMMDDHHMM
   // Exemplo: EUR2602221845 (EUR = ativo, 26=ano, 02=mês, 22=dia, 18=hora, 45=minuto)
   function gerarIdSinal(labelAtivo: string, timestamp: number): string {
-    const data = new Date(timestamp);
-    const brDate = new Date(data.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }));
+    // Usar offset direto (America/Sao_Paulo = UTC-3)
+    const dataUTC = new Date(timestamp);
+    const offsetMs = -3 * 60 * 60 * 1000;  // UTC-3 = -3 horas
+    const dataBRT = new Date(dataUTC.getTime() + offsetMs);
     
-    const yy = String(brDate.getFullYear()).slice(-2);  // 26
-    const mm = String(brDate.getMonth() + 1).padStart(2, '0');  // 02
-    const dd = String(brDate.getDate()).padStart(2, '0');  // 22
-    const hh = String(brDate.getHours()).padStart(2, '0');  // 18
-    const min = String(brDate.getMinutes()).padStart(2, '0');  // 45
+    const yy = String(dataBRT.getUTCFullYear()).slice(-2);  // 26
+    const mm = String(dataBRT.getUTCMonth() + 1).padStart(2, '0');  // 02
+    const dd = String(dataBRT.getUTCDate()).padStart(2, '0');  // 22
+    const hh = String(dataBRT.getUTCHours()).padStart(2, '0');  // 18
+    const min = String(dataBRT.getUTCMinutes()).padStart(2, '0');  // 45
     
     const prefixo = PREFIXO_ID_POR_ATIVO[labelAtivo] || labelAtivo.substring(0, 3).toUpperCase();
-    return `${prefixo}${yy}${mm}${dd}${hh}${min}`;
+    const idGerado = `${prefixo}${yy}${mm}${dd}${hh}${min}`;
+    
+    // Debug: verificar se está gerando corretamente
+    if (idGerado.includes('NaN')) {
+      console.error(`[ERRO ID] labelAtivo=${labelAtivo}, timestamp=${timestamp}, id=${idGerado}`);
+    }
+    
+    return idGerado;
   }
 
   const FINNHUB_KEY = 'd6cv5e1r01qgk7mjtr4gd6cv5e1r01qgk7mjtr50';
@@ -322,7 +331,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const logAtivos: string[] = [];
   const ativos = [
     { label: "Bitcoin", data: await getBTC(), prec: 2, isForex: false },
-    { label: "Ethereum", data: await getETH(), prec: 4, isForex: false },  // V120.1 NOVO
+    { label: "Ethereum", data: await getETH(), prec: 4, isForex: false },  // V121 NOVO - FIX NaN
     { label: "EURUSD",  data: await getEURUSD(), prec: 5, isForex: true  },
     { label: "USDJPY",  data: await getYahooForex("USDJPY=X", "USD/JPY"), prec: 5, isForex: true  },
     { label: "GBPUSD",  data: await getYahooForex("GBPUSD=X", "GBP/USD"), prec: 5, isForex: true  },
@@ -451,7 +460,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       <p><b>HORA DA REVISÃO:</b> ${horaRevisao}</p>
       <p><b>HORA ATUAL (BRT):</b> ${horaBR}</p>
       <p><b>MERCADO FOREX:</b> <span class="${statusForex === 'ABERTO' ? 'verde' : 'vermelho'}">${statusForex}</span></p>
-      <p><b>ATIVOS MONITORADOS:</b> Bitcoin, Ethereum, EURUSD, USDJPY, GBPUSD, AUDUSD, USDCAD, USDCHF</p>
       <div class="log"><p><b>LOG:</b></p>${logAtivos.map(l => `<p>${l}</p>`).join('') || '<p>Aguardando sinais...</p>'}</div>
       <script>setTimeout(() => location.reload(), 30000);</script>
     </body>
