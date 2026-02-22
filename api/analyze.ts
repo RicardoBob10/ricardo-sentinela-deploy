@@ -10,9 +10,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // ===========================================================================
   // CONFIGURAÇÃO DE IDENTIFICAÇÃO — VERSÃO 119
   // ===========================================================================
-  const versao      = "119";
-  const dataRevisao = "21/02/2026";
-  const horaRevisao = new Date().toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false });
+  const versao      = "120";
+  const dataRevisao = "22/02/2026";
+  const horaRevisao = "12:10";
 
   const token         = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id       = "7625668696";
