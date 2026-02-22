@@ -8,11 +8,11 @@ const cacheSinais: Record<string, number> = {};
 export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // ===========================================================================
-  // CONFIGURAÇÃO DE IDENTIFICAÇÃO — VERSÃO 119
+  // CONFIGURAÇÃO DE IDENTIFICAÇÃO — VERSÃO 120.1 (COM ETHEREUM)
   // ===========================================================================
-  const versao      = "120";
+  const versao      = "120.1";
   const dataRevisao = "22/02/2026";
-  const horaRevisao = "12:10";
+  const horaRevisao = "15:45";
 
   const token         = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id       = "7625668696";
@@ -46,6 +46,47 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } catch (_) {}
     try {
       const r = await fetch(`https://api.bybit.com/v5/market/kline?category=spot&symbol=BTCUSDT&interval=15&limit=500`, { signal: AbortSignal.timeout(4000) });
+      const d = await r.json();
+      if (d?.result?.list && Array.isArray(d.result.list)) {
+        return d.result.list
+          .map((v: any) => ({
+            t: Number(v[0]),
+            o: parseFloat(v[1]),
+            h: parseFloat(v[2]),
+            l: parseFloat(v[3]),
+            c: parseFloat(v[4]),
+            v: parseFloat(v[5]),
+          }))
+          .sort((a: any, b: any) => a.t - b.t);
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  // ===========================================================================
+  // FETCHER ETH — KuCoin (principal) + Bybit (fallback) [V120.1 NOVO]
+  // ===========================================================================
+  async function getETH(): Promise<any[] | null> {
+    try {
+      const endAt   = Math.floor(Date.now() / 1000);
+      const startAt = endAt - 500 * 900;
+      const r = await fetch(`https://api.kucoin.com/api/v1/market/candles?symbol=ETH-USDT&type=15min&startAt=${startAt}&endAt=${endAt}`, { signal: AbortSignal.timeout(4000) });
+      const d = await r.json();
+      if (d?.data && Array.isArray(d.data) && d.data.length > 0) {
+        return d.data
+          .map((v: any) => ({
+            t: Number(v[0]) * 1000,
+            o: parseFloat(v[1]),
+            c: parseFloat(v[2]),
+            h: parseFloat(v[3]),
+            l: parseFloat(v[4]),
+            v: parseFloat(v[5]),
+          }))
+          .sort((a: any, b: any) => a.t - b.t);
+      }
+    } catch (_) {}
+    try {
+      const r = await fetch(`https://api.bybit.com/v5/market/kline?category=spot&symbol=ETHUSDT&interval=15&limit=500`, { signal: AbortSignal.timeout(4000) });
       const d = await r.json();
       if (d?.result?.list && Array.isArray(d.result.list)) {
         return d.result.list
@@ -121,6 +162,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const MOEDAS_POR_ATIVO: Record<string, string[]> = {
     'Bitcoin' : ['USD'],
+    'Ethereum': ['USD'],      // V120.1 NOVO
     'EURUSD'  : ['EUR', 'USD'],
     'USDJPY'  : ['USD', 'JPY'],
     'GBPUSD'  : ['GBP', 'USD'],
@@ -133,6 +175,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Usado para rastreabilidade: ID = PREFIXO + YYMMDDHHMM
   const PREFIXO_ID_POR_ATIVO: Record<string, string> = {
     'Bitcoin' : 'BTC',
+    'Ethereum': 'ETH',        // V120.1 NOVO
     'EURUSD'  : 'EUR',
     'USDJPY'  : 'JPY',
     'GBPUSD'  : 'GBP',
@@ -279,6 +322,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const logAtivos: string[] = [];
   const ativos = [
     { label: "Bitcoin", data: await getBTC(), prec: 2, isForex: false },
+    { label: "Ethereum", data: await getETH(), prec: 4, isForex: false },  // V120.1 NOVO
     { label: "EURUSD",  data: await getEURUSD(), prec: 5, isForex: true  },
     { label: "USDJPY",  data: await getYahooForex("USDJPY=X", "USD/JPY"), prec: 5, isForex: true  },
     { label: "GBPUSD",  data: await getYahooForex("GBPUSD=X", "GBP/USD"), prec: 5, isForex: true  },
@@ -407,6 +451,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       <p><b>HORA DA REVISÃO:</b> ${horaRevisao}</p>
       <p><b>HORA ATUAL (BRT):</b> ${horaBR}</p>
       <p><b>MERCADO FOREX:</b> <span class="${statusForex === 'ABERTO' ? 'verde' : 'vermelho'}">${statusForex}</span></p>
+      <p><b>ATIVOS MONITORADOS:</b> Bitcoin, Ethereum, EURUSD, USDJPY, GBPUSD, AUDUSD, USDCAD, USDCHF</p>
       <div class="log"><p><b>LOG:</b></p>${logAtivos.map(l => `<p>${l}</p>`).join('') || '<p>Aguardando sinais...</p>'}</div>
       <script>setTimeout(() => location.reload(), 30000);</script>
     </body>
