@@ -1,18 +1,18 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 
 // =============================================================================
-// TRAVA ANTI-DUPLICIDADE — NC 92-01 [R1 CORRIGIDO]
+// TRAVA ANTI-DUPLICIDADE — CORRIGIDA [V119 R00]
 // =============================================================================
 const cacheSinais: Record<string, number> = {};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // ===========================================================================
-  // CONFIGURAÇÃO DE IDENTIFICAÇÃO — VERSÃO 118
+  // CONFIGURAÇÃO DE IDENTIFICAÇÃO — VERSÃO 119
   // ===========================================================================
-  const versao      = "118";
+  const versao      = "119";
   const dataRevisao = "21/02/2026";
-  const horaRevisao = "21:26";
+  const horaRevisao = new Date().toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false });
 
   const token         = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id       = "7625668696";
@@ -91,6 +91,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return null;
   }
 
+  // ===========================================================================
+  // FETCHER GENÉRICO FOREX — TwelveData (principal) + Yahoo (fallback)
+  // ===========================================================================
   async function getYahooForex(yahooSymbol: string, tdSymbol: string): Promise<any[] | null> {
     try {
       const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${yahooSymbol}?interval=15m&range=60d`, { signal: AbortSignal.timeout(4000) });
@@ -216,9 +219,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return null;
   }
 
+  // =============================================================================
+  // CORREÇÃO V119: normalizarIdVela — sem window.innerWidth
+  // =============================================================================
   function normalizarIdVela(label: string, ts: number): string {
-    const quinzeMin  = 15 * 60 * 1000;
-    const janelaNorm = Math.floor(ts / window.innerWidth === 0 ? ts : ts / quinzeMin) * quinzeMin;
+    const quinzeMin = 15 * 60 * 1000;
+    const janelaNorm = Math.floor(ts / quinzeMin) * quinzeMin;
     return `${label}_${janelaNorm}`;
   }
 
@@ -232,12 +238,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }): number {
     let score = 0;
     // Redistribuição de pesos sem EMA200 (Total 100)
-    if (params.cruzamento)   score += 30; // Aumentado (era 15)
-    if (params.rsiFavoravel) score += 20; // Aumentado (era 15)
+    if (params.cruzamento)   score += 30;
+    if (params.rsiFavoravel) score += 20;
     if (params.mercadoForte) score += 15;
     if (params.rompimento)   score += 15;
     if (params.volumeForte)  score += 10;
-    if (params.semNoticia)   score += 10; // Aumentado (era 5)
+    if (params.semNoticia)   score += 10;
     return score;
   }
 
@@ -290,8 +296,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const mercadoForte  = distanciaEMAs > (atr * 0.35);
 
     const slice15 = ativo.data.slice(Math.max(0, i - 15), i);
-    const rompeuTopo  = call ? (vela.c > Math.max(...slice15.map((v: any) => v.h))) : false;
-    const rompeuFundo = put  ? (vela.c < Math.min(...slice15.map((v: any) => v.l))) : false;
+
+    // =============================================================================
+    // CORREÇÃO V119: Rompimento valida close (não apenas high/low)
+    // =============================================================================
+    const maiorTopo   = Math.max(...slice15.map((v: any) => v.h));
+    const menorFundo  = Math.min(...slice15.map((v: any) => v.l));
+    const rompeuTopo  = call ? (vela.c > maiorTopo && vela.c >= vela.o) : false;
+    const rompeuFundo = put  ? (vela.c < menorFundo && vela.c <= vela.o) : false;
     const rompimento  = rompeuTopo || rompeuFundo;
 
     let volumeForte = true;
@@ -305,7 +317,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const semNoticia = !temNoticia;
 
     const score = calcularScore({
-      cruzamento: true,
+      cruzamento: call || put,
       rsiFavoravel,
       mercadoForte,
       rompimento,
@@ -321,10 +333,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const sinalId = normalizarIdVela(ativo.label, vela.t);
-    if (cacheSinais[sinalId]) continue;
+    if (cacheSinais[sinalId]) {
+      logAtivos.push(`[${ativo.label}] 🔄 Sinal duplicado bloqueado em ${tempoVelaStr}`);
+      continue;
+    }
     cacheSinais[sinalId] = agoraUnix;
 
-    const msg = `${call ? "🟢" : "🔴"} <b>SINAL EMITIDO!</b>\n<b>ATIVO:</b> ${ativo.label}\n<b>SINAL:</b> ${call ? "↑ COMPRAR" : "↓ VENDER"}\n<b>PREÇO:</b> $ ${vela.c.toFixed(ativo.prec)}`;
+    const msg = `${call ? "🟢" : "🔴"} <b>SINAL EMITIDO!</b>\n<b>ATIVO:</b> ${ativo.label}\n<b>SINAL:</b> ${call ? "↑ COMPRAR" : "↓ VENDER"}\n<b>VELA:</b> ${tempoVelaStr}\n<b>PREÇO:</b> $ ${vela.c.toFixed(ativo.prec)}`;
 
     try {
       await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
@@ -340,7 +355,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }),
       });
       logAtivos.push(`[${ativo.label}] ✅ Enviado — ${scoreLog}`);
-    } catch (e) {}
+    } catch (e) {
+      logAtivos.push(`[${ativo.label}] ❌ Falha ao enviar — ${scoreLog}`);
+    }
   }
 
   const statusForex = mercadoForexAberto() ? "ABERTO" : "FECHADO";
@@ -348,15 +365,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   return res.status(200).send(`
     <!DOCTYPE html>
     <html lang="pt-BR">
-    <head><meta charset="UTF-8"><title>RICARDO SENTINELA BOT</title><style>body{background-color:#ffffff;color:#000000;font-family:sans-serif;padding:40px;line-height:1.5;}p{margin:10px 0;font-size:16px;}.verde{color:#008000;font-weight:bold;}.vermelho{color:#cc0000;font-weight:bold;}.log{margin-top:20px;font-size:13px;color:#444;font-family:monospace;}</style></head>
+    <head><meta charset="UTF-8"><title>RICARDO SENTINELA BOT</title><style>body{background-color:#ffffff;color:#000000;font-family:sans-serif;padding:40px;line-height:1.5;}p{margin:10px 0;font-size:16px;}.verde{color:#008000;font-weight:bold;}.vermelho{color:#cc0000;font-weight:bold;}.log{margin-top:20px;font-size:13px;color:#444;font-family:monospace;max-height:500px;overflow-y:auto;border:1px solid #ddd;padding:10px;}</style></head>
     <body>
       <p><b>RICARDO SENTINELA BOT</b></p>
       <p><b>STATUS:</b> <span class="verde">ATIVADO</span></p>
       <p><b>VERSÃO ATUAL:</b> ${versao}</p>
       <p><b>DATA DA REVISÃO:</b> ${dataRevisao}</p>
       <p><b>HORA DA REVISÃO:</b> ${horaRevisao}</p>
+      <p><b>HORA ATUAL (BRT):</b> ${horaBR}</p>
       <p><b>MERCADO FOREX:</b> <span class="${statusForex === 'ABERTO' ? 'verde' : 'vermelho'}">${statusForex}</span></p>
-      <div class="log"><p><b>LOG:</b></p>${logAtivos.map(l => `<p>${l}</p>`).join('') || '<p>Aguardando...</p>'}</div>
+      <div class="log"><p><b>LOG:</b></p>${logAtivos.map(l => `<p>${l}</p>`).join('') || '<p>Aguardando sinais...</p>'}</div>
       <script>setTimeout(() => location.reload(), 30000);</script>
     </body>
     </html>
