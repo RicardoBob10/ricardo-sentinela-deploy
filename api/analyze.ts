@@ -129,6 +129,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     'USDCHF'  : ['USD', 'CHF'],
   };
 
+  // ← V119 NOVO: Mapeamento de prefixos de ID por ativo
+  // Usado para rastreabilidade: ID = PREFIXO + YYMMDDHHMM
+  const PREFIXO_ID_POR_ATIVO: Record<string, string> = {
+    'Bitcoin' : 'BTC',
+    'EURUSD'  : 'EUR',
+    'USDJPY'  : 'JPY',
+    'GBPUSD'  : 'GBP',
+    'AUDUSD'  : 'AUD',
+    'USDCAD'  : 'CAD',
+    'USDCHF'  : 'CHF',
+  };
+
+  // ← V119 NOVO: Função para gerar ID com rastreabilidade
+  // Formato: PREFIXO + YYMMDDHHMM
+  // Exemplo: EUR2602221845 (EUR = ativo, 26=ano, 02=mês, 22=dia, 18=hora, 45=minuto)
+  function gerarIdSinal(labelAtivo: string, timestamp: number): string {
+    const data = new Date(timestamp);
+    const brDate = new Date(data.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }));
+    
+    const yy = String(brDate.getFullYear()).slice(-2);  // 26
+    const mm = String(brDate.getMonth() + 1).padStart(2, '0');  // 02
+    const dd = String(brDate.getDate()).padStart(2, '0');  // 22
+    const hh = String(brDate.getHours()).padStart(2, '0');  // 18
+    const min = String(brDate.getMinutes()).padStart(2, '0');  // 45
+    
+    const prefixo = PREFIXO_ID_POR_ATIVO[labelAtivo] || labelAtivo.substring(0, 3).toUpperCase();
+    return `${prefixo}${yy}${mm}${dd}${hh}${min}`;
+  }
+
   const FINNHUB_KEY = 'd6cv5e1r01qgk7mjtr4gd6cv5e1r01qgk7mjtr50';
 
   async function temNoticiaAltoImpacto(labelAtivo: string): Promise<boolean> {
@@ -339,7 +368,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     cacheSinais[sinalId] = agoraUnix;
 
-    const msg = `${call ? "🟢" : "🔴"} <b>SINAL EMITIDO!</b>\n<b>ATIVO:</b> ${ativo.label}\n<b>SINAL:</b> ${call ? "↑ COMPRAR" : "↓ VENDER"}\n<b>VELA:</b> ${tempoVelaStr}\n<b>PREÇO:</b> $ ${vela.c.toFixed(ativo.prec)}`;
+    // ← V119 NOVO: Gerar ID com rastreabilidade completa
+    const idRastreabilidade = gerarIdSinal(ativo.label, vela.t);
+
+    // ← V119 ATUALIZADO: Mensagem com ID para rastreabilidade
+    const msg = `${call ? "🟢" : "🔴"} <b>SINAL EMITIDO!</b>\n<b>ATIVO:</b> ${ativo.label}\n<b>SINAL:</b> ${call ? "↑ COMPRAR" : "↓ VENDER"}\n<b>ID:</b> ${idRastreabilidade}`;
 
     try {
       await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
@@ -350,11 +383,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           text: msg,
           parse_mode: 'HTML',
           reply_markup: {
-            inline_keyboard: [[{ text: '◯ EXECUTAR', callback_data: `exec_${ativo.label}_${call ? 'C' : 'V'}_${vela.c.toFixed(ativo.prec)}_${atr.toFixed(ativo.prec)}` }]]
+            inline_keyboard: [[{ text: '◯ EXECUTAR', callback_data: `exec_${ativo.label}_${call ? 'C' : 'V'}_${vela.c.toFixed(ativo.prec)}_${atr.toFixed(ativo.prec)}_${idRastreabilidade}` }]]
           }
         }),
       });
-      logAtivos.push(`[${ativo.label}] ✅ Enviado — ${scoreLog}`);
+      logAtivos.push(`[${ativo.label}] ✅ Enviado (ID: ${idRastreabilidade}) — ${scoreLog}`);
     } catch (e) {
       logAtivos.push(`[${ativo.label}] ❌ Falha ao enviar — ${scoreLog}`);
     }
