@@ -8,11 +8,11 @@ const cacheSinais: Record<string, number> = {};
 export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // ===========================================================================
-  // CONFIGURAÇÃO DE IDENTIFICAÇÃO — VERSÃO 122.3 (PARALLEL FETCH)
+  // CONFIGURAÇÃO DE IDENTIFICAÇÃO — VERSÃO 122.4 (16 ATIVOS)
   // ===========================================================================
-  const versao      = "122.3";
+  const versao      = "122.4";
   const dataRevisao = "25/02/2026";
-  const horaRevisao = "08:30";
+  const horaRevisao = "09:00";
 
   const token         = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id       = "7625668696";
@@ -64,35 +64,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // ===========================================================================
-  // FETCHER EUR/USD — TwelveData (principal) + Yahoo Finance (fallback)
-  // ===========================================================================
-  async function getEURUSD(): Promise<any[] | null> {
-    try {
-      const r = await fetch(`https://api.twelvedata.com/time_series?symbol=EUR/USD&interval=15min&outputsize=500&apikey=${twelveDataKey}`, { signal: AbortSignal.timeout(4000) });
-      const d = await r.json();
-      if (d?.values && Array.isArray(d.values) && d.values.length > 0) {
-        return d.values
-          .map((v: any) => { const ts = new Date(v.datetime + 'Z').getTime(); return { t: isNaN(ts) ? new Date(v.datetime).getTime() : ts, c: parseFloat(v.close), h: parseFloat(v.high), l: parseFloat(v.low), o: parseFloat(v.open), v: 0 }; })
-          .filter((v: any) => !isNaN(v.t))
-          .sort((a: any, b: any) => a.t - b.t);
-      }
-    } catch (_) {}
-    try {
-      const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/EURUSD=X?interval=15m&range=60d`, { signal: AbortSignal.timeout(4000) });
-      const d = await r.json();
-      const chart = d?.chart?.result?.[0];
-      if (chart) {
-        return chart.timestamp
-          .map((t: number, i: number) => ({ t: t * 1000, c: chart.indicators.quote[0].close[i], h: chart.indicators.quote[0].high[i], l: chart.indicators.quote[0].low[i], o: chart.indicators.quote[0].open[i], v: 0 }))
-          .filter((v: any) => v.c != null && !isNaN(v.c))
-          .sort((a: any, b: any) => a.t - b.t);
-      }
-    } catch (_) {}
-    return null;
-  }
-
-  // ===========================================================================
-  // FETCHER ETH — KuCoin (principal) + Bybit (fallback) [V121 NOVO]
+  // FETCHER ETH — KuCoin (principal) + Bybit (fallback)
   // ===========================================================================
   async function getETH(): Promise<any[] | null> {
     try {
@@ -133,7 +105,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // ===========================================================================
-  // FETCHER GENÉRICO FOREX — Yahoo (principal) + TwelveData (fallback)
+  // FETCHER EUR/USD — TwelveData (principal) + Yahoo Finance (fallback)
+  // ===========================================================================
+  async function getEURUSD(): Promise<any[] | null> {
+    try {
+      const r = await fetch(`https://api.twelvedata.com/time_series?symbol=EUR/USD&interval=15min&outputsize=500&apikey=${twelveDataKey}`, { signal: AbortSignal.timeout(4000) });
+      const d = await r.json();
+      if (d?.values && Array.isArray(d.values) && d.values.length > 0) {
+        return d.values
+          .map((v: any) => { const ts = new Date(v.datetime + 'Z').getTime(); return { t: isNaN(ts) ? new Date(v.datetime).getTime() : ts, c: parseFloat(v.close), h: parseFloat(v.high), l: parseFloat(v.low), o: parseFloat(v.open), v: 0 }; })
+          .filter((v: any) => !isNaN(v.t))
+          .sort((a: any, b: any) => a.t - b.t);
+      }
+    } catch (_) {}
+    try {
+      const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/EURUSD=X?interval=15m&range=60d`, { signal: AbortSignal.timeout(4000) });
+      const d = await r.json();
+      const chart = d?.chart?.result?.[0];
+      if (chart) {
+        return chart.timestamp
+          .map((t: number, i: number) => ({ t: t * 1000, c: chart.indicators.quote[0].close[i], h: chart.indicators.quote[0].high[i], l: chart.indicators.quote[0].low[i], o: chart.indicators.quote[0].open[i], v: 0 }))
+          .filter((v: any) => v.c != null && !isNaN(v.c))
+          .sort((a: any, b: any) => a.t - b.t);
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  // ===========================================================================
+  // FETCHER FOREX EXISTENTES — Yahoo (principal) + TwelveData (fallback)
+  // Usado por: USDJPY, GBPUSD, AUDUSD, USDCAD, USDCHF
   // ===========================================================================
   async function getYahooForex(yahooSymbol: string, tdSymbol: string): Promise<any[] | null> {
     try {
@@ -160,6 +161,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return null;
   }
 
+  // ===========================================================================
+  // FETCHER NOVOS PARES — Yahoo Finance APENAS (sem TwelveData)
+  // Motivo: plano gratuito TwelveData = 8 req/min. Novos pares não consomem cota.
+  // Usado por: AUDJPY, EURAUD, EURCAD, EURCHF, EURGBP, EURJPY, GBPAUD, GBPJPY
+  // ===========================================================================
+  async function getYahooOnly(yahooSymbol: string): Promise<any[] | null> {
+    try {
+      const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${yahooSymbol}?interval=15m&range=60d`, { signal: AbortSignal.timeout(4000) });
+      const d = await r.json();
+      const chart = d?.chart?.result?.[0];
+      if (chart && chart.timestamp && chart.indicators?.quote?.[0]) {
+        return chart.timestamp
+          .map((t: number, i: number) => { const q = chart.indicators.quote[0]; return { t: t * 1000, c: q.close?.[i], h: q.high?.[i], l: q.low?.[i], o: q.open?.[i], v: 0 }; })
+          .filter((v: any) => v.c != null && !isNaN(v.c) && !isNaN(v.t))
+          .sort((a: any, b: any) => a.t - b.t);
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  // ===========================================================================
+  // TABELAS DE CONFIGURAÇÃO
+  // ===========================================================================
   const MOEDAS_POR_ATIVO: Record<string, string[]> = {
     'Bitcoin' : ['USD'],
     'Ethereum': ['USD'],
@@ -169,29 +193,47 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     'AUDUSD'  : ['AUD', 'USD'],
     'USDCAD'  : ['USD', 'CAD'],
     'USDCHF'  : ['USD', 'CHF'],
+    // Novos pares — V122.4
+    'AUDJPY'  : ['AUD', 'JPY'],
+    'EURAUD'  : ['EUR', 'AUD'],
+    'EURCAD'  : ['EUR', 'CAD'],
+    'EURCHF'  : ['EUR', 'CHF'],
+    'EURGBP'  : ['EUR', 'GBP'],
+    'EURJPY'  : ['EUR', 'JPY'],
+    'GBPAUD'  : ['GBP', 'AUD'],
+    'GBPJPY'  : ['GBP', 'JPY'],
   };
 
   const PREFIXO_ID_POR_ATIVO: Record<string, string> = {
     'Bitcoin' : 'BTC',
     'Ethereum': 'ETH',
-    'EURUSD'  : 'EUR',
-    'USDJPY'  : 'JPY',
-    'GBPUSD'  : 'GBP',
-    'AUDUSD'  : 'AUD',
-    'USDCAD'  : 'CAD',
-    'USDCHF'  : 'CHF',
+    'EURUSD'  : 'EU',
+    'USDJPY'  : 'UJ',
+    'GBPUSD'  : 'GU',
+    'AUDUSD'  : 'AU',
+    'USDCAD'  : 'UC',
+    'USDCHF'  : 'UF',
+    // Novos pares — V122.4
+    'AUDJPY'  : 'AJ',
+    'EURAUD'  : 'EA',
+    'EURCAD'  : 'EC',
+    'EURCHF'  : 'EF',
+    'EURGBP'  : 'EG',
+    'EURJPY'  : 'EJ',
+    'GBPAUD'  : 'GA',
+    'GBPJPY'  : 'GJ',
   };
 
   function gerarIdSinal(labelAtivo: string, timestamp: number): string {
-    const dataUTC = new Date(timestamp);
+    const dataUTC  = new Date(timestamp);
     const offsetMs = -3 * 60 * 60 * 1000;
-    const dataBRT = new Date(dataUTC.getTime() + offsetMs);
+    const dataBRT  = new Date(dataUTC.getTime() + offsetMs);
     const yy  = String(dataBRT.getUTCFullYear()).slice(-2);
     const mm  = String(dataBRT.getUTCMonth() + 1).padStart(2, '0');
     const dd  = String(dataBRT.getUTCDate()).padStart(2, '0');
     const hh  = String(dataBRT.getUTCHours()).padStart(2, '0');
     const min = String(dataBRT.getUTCMinutes()).padStart(2, '0');
-    const prefixo = PREFIXO_ID_POR_ATIVO[labelAtivo] || labelAtivo.substring(0, 3).toUpperCase();
+    const prefixo  = PREFIXO_ID_POR_ATIVO[labelAtivo] || labelAtivo.substring(0, 3).toUpperCase();
     const idGerado = `${prefixo}${yy}${mm}${dd}${hh}${min}`;
     if (idGerado.includes('NaN')) {
       console.error(`[ERRO ID] labelAtivo=${labelAtivo}, timestamp=${timestamp}, id=${idGerado}`);
@@ -225,8 +267,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   function mercadoForexAberto(): boolean {
-    const diaSem  = new Date(agoraUnix).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo', weekday: 'long' });
-    const hStr    = new Date(agoraUnix).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false });
+    const diaSem   = new Date(agoraUnix).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo', weekday: 'long' });
+    const hStr     = new Date(agoraUnix).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false });
     const [hh, mm] = hStr.split(':').map(Number);
     const minutos  = hh * 60 + mm;
     const dia      = diaSem.toLowerCase();
@@ -314,25 +356,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // ===========================================================================
-  // V122.3 — BUSCA PARALELA: todos os 8 ativos ao mesmo tempo
-  // Antes: sequencial (até 64s) → Agora: paralelo (máx ~8s)
+  // BUSCA PARALELA — 16 ativos simultâneos [V122.3 → V122.4]
   // ===========================================================================
   const [
     btcData, ethData, eurusdData,
-    usdJpyData, gbpUsdData, audUsdData, usdCadData, usdChfData
+    usdJpyData, gbpUsdData, audUsdData, usdCadData, usdChfData,
+    audJpyData, eurAudData, eurCadData, eurChfData,
+    eurGbpData, eurJpyData, gbpAudData, gbpJpyData,
   ] = await Promise.all([
+    // Ativos existentes
     getBTC(),
     getETH(),
     getEURUSD(),
-    getYahooForex("USDJPY=X", "USD/JPY"),
-    getYahooForex("GBPUSD=X", "GBP/USD"),
-    getYahooForex("AUDUSD=X", "AUD/USD"),
-    getYahooForex("USDCAD=X", "USD/CAD"),
-    getYahooForex("USDCHF=X", "USD/CHF"),
+    getYahooForex("USDJPY=X",  "USD/JPY"),
+    getYahooForex("GBPUSD=X",  "GBP/USD"),
+    getYahooForex("AUDUSD=X",  "AUD/USD"),
+    getYahooForex("USDCAD=X",  "USD/CAD"),
+    getYahooForex("USDCHF=X",  "USD/CHF"),
+    // Novos pares — Yahoo Finance apenas
+    getYahooOnly("AUDJPY=X"),
+    getYahooOnly("EURAUD=X"),
+    getYahooOnly("EURCAD=X"),
+    getYahooOnly("EURCHF=X"),
+    getYahooOnly("EURGBP=X"),
+    getYahooOnly("EURJPY=X"),
+    getYahooOnly("GBPAUD=X"),
+    getYahooOnly("GBPJPY=X"),
   ]);
 
   const logAtivos: string[] = [];
   const ativos = [
+    // Ativos existentes
     { label: "Bitcoin",  data: btcData,     prec: 2, isForex: false },
     { label: "Ethereum", data: ethData,     prec: 4, isForex: false },
     { label: "EURUSD",   data: eurusdData,  prec: 5, isForex: true  },
@@ -341,6 +395,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     { label: "AUDUSD",   data: audUsdData,  prec: 5, isForex: true  },
     { label: "USDCAD",   data: usdCadData,  prec: 5, isForex: true  },
     { label: "USDCHF",   data: usdChfData,  prec: 5, isForex: true  },
+    // Novos pares — V122.4
+    { label: "AUDJPY",   data: audJpyData,  prec: 5, isForex: true  },
+    { label: "EURAUD",   data: eurAudData,  prec: 5, isForex: true  },
+    { label: "EURCAD",   data: eurCadData,  prec: 5, isForex: true  },
+    { label: "EURCHF",   data: eurChfData,  prec: 5, isForex: true  },
+    { label: "EURGBP",   data: eurGbpData,  prec: 5, isForex: true  },
+    { label: "EURJPY",   data: eurJpyData,  prec: 5, isForex: true  },
+    { label: "GBPAUD",   data: gbpAudData,  prec: 5, isForex: true  },
+    { label: "GBPJPY",   data: gbpJpyData,  prec: 5, isForex: true  },
   ];
 
   for (const ativo of ativos) {
