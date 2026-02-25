@@ -1,18 +1,18 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 
 // =============================================================================
-// TRAVA ANTI-DUPLICIDADE — CORRIGIDA [V119 R00]
+// TRAVA ANTI-DUPLICIDADE — V122
 // =============================================================================
 const cacheSinais: Record<string, number> = {};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // ===========================================================================
-  // CONFIGURAÇÃO DE IDENTIFICAÇÃO — VERSÃO 121
+  // CONFIGURAÇÃO DE IDENTIFICAÇÃO — VERSÃO 122
   // ===========================================================================
-  const versao      = "121";
-  const dataRevisao = "22/02/2026";
-  const horaRevisao = "19:30";
+  const versao      = "122";
+  const dataRevisao = "24/02/2026";
+  const horaRevisao = "23:00";
 
   const token         = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id       = "7625668696";
@@ -23,13 +23,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const horaBR    = new Date(agoraUnix).toLocaleTimeString('pt-BR', optionsBR);
 
   // ===========================================================================
-  // FETCHER BTC — KuCoin (principal) + Bybit (fallback)
+  // V122: TIMEFRAME ALTERADO PARA 5 MINUTOS (M5)
+  // ===========================================================================
+  const TIMEFRAME = '5min';  // Alterado de 15min para 5min
+  const TIMEFRAME_MS = 5 * 60 * 1000;  // 5 minutos em ms
+
+  // ===========================================================================
+  // FETCHER BTC — KuCoin (principal) + Bybit (fallback) [M5]
   // ===========================================================================
   async function getBTC(): Promise<any[] | null> {
     try {
       const endAt   = Math.floor(Date.now() / 1000);
-      const startAt = endAt - 500 * 900;
-      const r = await fetch(`https://api.kucoin.com/api/v1/market/candles?symbol=BTC-USDT&type=15min&startAt=${startAt}&endAt=${endAt}`, { signal: AbortSignal.timeout(4000) });
+      const startAt = endAt - 500 * 300;  // Ajustado para M5
+      const r = await fetch(`https://api.kucoin.com/api/v1/market/candles?symbol=BTC-USDT&type=5min&startAt=${startAt}&endAt=${endAt}`, { signal: AbortSignal.timeout(4000) });
       const d = await r.json();
       if (d?.data && Array.isArray(d.data) && d.data.length > 0) {
         return d.data
@@ -45,7 +51,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     } catch (_) {}
     try {
-      const r = await fetch(`https://api.bybit.com/v5/market/kline?category=spot&symbol=BTCUSDT&interval=15&limit=500`, { signal: AbortSignal.timeout(4000) });
+      const r = await fetch(`https://api.bybit.com/v5/market/kline?category=spot&symbol=BTCUSDT&interval=5&limit=500`, { signal: AbortSignal.timeout(4000) });
       const d = await r.json();
       if (d?.result?.list && Array.isArray(d.result.list)) {
         return d.result.list
@@ -64,41 +70,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // ===========================================================================
-  // FETCHER EUR/USD — TwelveData (principal) + Yahoo Finance (fallback)
-  // ===========================================================================
-  async function getEURUSD(): Promise<any[] | null> {
-    try {
-      const r = await fetch(`https://api.twelvedata.com/time_series?symbol=EUR/USD&interval=15min&outputsize=500&apikey=${twelveDataKey}`, { signal: AbortSignal.timeout(4000) });
-      const d = await r.json();
-      if (d?.values && Array.isArray(d.values) && d.values.length > 0) {
-        return d.values
-          .map((v: any) => { const ts = new Date(v.datetime + 'Z').getTime(); return { t: isNaN(ts) ? new Date(v.datetime).getTime() : ts, c: parseFloat(v.close), h: parseFloat(v.high), l: parseFloat(v.low), o: parseFloat(v.open), v: 0 }; })
-          .filter((v: any) => !isNaN(v.t))
-          .sort((a: any, b: any) => a.t - b.t);
-      }
-    } catch (_) {}
-    try {
-      const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/EURUSD=X?interval=15m&range=60d`, { signal: AbortSignal.timeout(4000) });
-      const d = await r.json();
-      const chart = d?.chart?.result?.[0];
-      if (chart) {
-        return chart.timestamp
-          .map((t: number, i: number) => ({ t: t * 1000, c: chart.indicators.quote[0].close[i], h: chart.indicators.quote[0].high[i], l: chart.indicators.quote[0].low[i], o: chart.indicators.quote[0].open[i], v: 0 }))
-          .filter((v: any) => v.c != null && !isNaN(v.c))
-          .sort((a: any, b: any) => a.t - b.t);
-      }
-    } catch (_) {}
-    return null;
-  }
-
-  // ===========================================================================
-  // FETCHER ETH — KuCoin (principal) + Bybit (fallback) [V121 NOVO]
+  // FETCHER ETH — KuCoin (principal) + Bybit (fallback) [M5]
   // ===========================================================================
   async function getETH(): Promise<any[] | null> {
     try {
       const endAt   = Math.floor(Date.now() / 1000);
-      const startAt = endAt - 500 * 900;
-      const r = await fetch(`https://api.kucoin.com/api/v1/market/candles?symbol=ETH-USDT&type=15min&startAt=${startAt}&endAt=${endAt}`, { signal: AbortSignal.timeout(4000) });
+      const startAt = endAt - 500 * 300;  // Ajustado para M5
+      const r = await fetch(`https://api.kucoin.com/api/v1/market/candles?symbol=ETH-USDT&type=5min&startAt=${startAt}&endAt=${endAt}`, { signal: AbortSignal.timeout(4000) });
       const d = await r.json();
       if (d?.data && Array.isArray(d.data) && d.data.length > 0) {
         return d.data
@@ -114,7 +92,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     } catch (_) {}
     try {
-      const r = await fetch(`https://api.bybit.com/v5/market/kline?category=spot&symbol=ETHUSDT&interval=15&limit=500`, { signal: AbortSignal.timeout(4000) });
+      const r = await fetch(`https://api.bybit.com/v5/market/kline?category=spot&symbol=ETHUSDT&interval=5&limit=500`, { signal: AbortSignal.timeout(4000) });
       const d = await r.json();
       if (d?.result?.list && Array.isArray(d.result.list)) {
         return d.result.list
@@ -133,11 +111,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // ===========================================================================
-  // FETCHER GENÉRICO FOREX — TwelveData (principal) + Yahoo (fallback)
+  // FETCHER FOREX GENÉRICO — Yahoo Finance (principal) + TwelveData (fallback) [M5]
   // ===========================================================================
-  async function getYahooForex(yahooSymbol: string, tdSymbol: string): Promise<any[] | null> {
+  async function getForexM5(yahooSymbol: string, tdSymbol: string): Promise<any[] | null> {
     try {
-      const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${yahooSymbol}?interval=15m&range=60d`, { signal: AbortSignal.timeout(4000) });
+      const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${yahooSymbol}?interval=5m&range=60d`, { signal: AbortSignal.timeout(4000) });
       const d = await r.json();
       const chart = d?.chart?.result?.[0];
       if (chart && chart.timestamp && chart.indicators?.quote?.[0]) {
@@ -148,7 +126,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     } catch (_) {}
     try {
-      const r = await fetch(`https://api.twelvedata.com/time_series?symbol=${tdSymbol}&interval=15min&outputsize=500&apikey=${twelveDataKey}`, { signal: AbortSignal.timeout(4000) });
+      const r = await fetch(`https://api.twelvedata.com/time_series?symbol=${tdSymbol}&interval=5min&outputsize=500&apikey=${twelveDataKey}`, { signal: AbortSignal.timeout(4000) });
       const d = await r.json();
       if (d?.values && Array.isArray(d.values) && d.values.length > 0) {
         return d.values
@@ -160,49 +138,63 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return null;
   }
 
+  // ===========================================================================
+  // MAPEAMENTO DE ATIVOS V122 (PREFIXOS 2 CHARS + 8 NOVOS FOREX)
+  // ===========================================================================
   const MOEDAS_POR_ATIVO: Record<string, string[]> = {
     'Bitcoin' : ['USD'],
-    'Ethereum': ['USD'],       // V121 NOVO
-    'EURUSD'  : ['EUR', 'USD'],
-    'USDJPY'  : ['USD', 'JPY'],
-    'GBPUSD'  : ['GBP', 'USD'],
-    'AUDUSD'  : ['AUD', 'USD'],
-    'USDCAD'  : ['USD', 'CAD'],
-    'USDCHF'  : ['USD', 'CHF'],
+    'Ethereum': ['USD'],
+    'EUR/USD' : ['EUR', 'USD'],
+    'USD/JPY' : ['USD', 'JPY'],
+    'GBP/USD' : ['GBP', 'USD'],
+    'AUD/USD' : ['AUD', 'USD'],
+    'USD/CAD' : ['USD', 'CAD'],
+    'USD/CHF' : ['USD', 'CHF'],
+    // V122 NOVOS ATIVOS
+    'AUD/JPY' : ['AUD', 'JPY'],
+    'EUR/AUD' : ['EUR', 'AUD'],
+    'EUR/CAD' : ['EUR', 'CAD'],
+    'EUR/CHF' : ['EUR', 'CHF'],
+    'EUR/GBP' : ['EUR', 'GBP'],
+    'EUR/JPY' : ['EUR', 'JPY'],
+    'GBP/AUD' : ['GBP', 'AUD'],
+    'GBP/JPY' : ['GBP', 'JPY'],
   };
 
-  // ← V119 NOVO: Mapeamento de prefixos de ID por ativo
-  // Usado para rastreabilidade: ID = PREFIXO + YYMMDDHHMM
   const PREFIXO_ID_POR_ATIVO: Record<string, string> = {
     'Bitcoin' : 'BTC',
-    'Ethereum': 'ETH',        // V121 NOVO - FIX para problema de NaN
-    'EURUSD'  : 'EUR',
-    'USDJPY'  : 'JPY',
-    'GBPUSD'  : 'GBP',
-    'AUDUSD'  : 'AUD',
-    'USDCAD'  : 'CAD',
-    'USDCHF'  : 'CHF',
+    'Ethereum': 'ETH',
+    'EUR/USD' : 'EU',
+    'USD/JPY' : 'UJ',
+    'GBP/USD' : 'GU',
+    'AUD/USD' : 'AU',
+    'USD/CAD' : 'UC',
+    'USD/CHF' : 'UF',
+    // V122 NOVOS PREFIXOS 2 CHARS
+    'AUD/JPY' : 'AJ',
+    'EUR/AUD' : 'EA',
+    'EUR/CAD' : 'EC',
+    'EUR/CHF' : 'EF',
+    'EUR/GBP' : 'EG',
+    'EUR/JPY' : 'EJ',
+    'GBP/AUD' : 'GA',
+    'GBP/JPY' : 'GJ',
   };
 
-  // ← V121 CORRIGIDA: Função para gerar ID com rastreabilidade (SEM NaN)
-  // Formato: PREFIXO + YYMMDDHHMM
-  // Exemplo: EUR2602221845 (EUR = ativo, 26=ano, 02=mês, 22=dia, 18=hora, 45=minuto)
   function gerarIdSinal(labelAtivo: string, timestamp: number): string {
-    // Usar offset direto (America/Sao_Paulo = UTC-3)
     const dataUTC = new Date(timestamp);
-    const offsetMs = -3 * 60 * 60 * 1000;  // UTC-3 = -3 horas
+    const offsetMs = -3 * 60 * 60 * 1000;
     const dataBRT = new Date(dataUTC.getTime() + offsetMs);
     
-    const yy = String(dataBRT.getUTCFullYear()).slice(-2);  // 26
-    const mm = String(dataBRT.getUTCMonth() + 1).padStart(2, '0');  // 02
-    const dd = String(dataBRT.getUTCDate()).padStart(2, '0');  // 22
-    const hh = String(dataBRT.getUTCHours()).padStart(2, '0');  // 18
-    const min = String(dataBRT.getUTCMinutes()).padStart(2, '0');  // 45
+    const yy = String(dataBRT.getUTCFullYear()).slice(-2);
+    const mm = String(dataBRT.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(dataBRT.getUTCDate()).padStart(2, '0');
+    const hh = String(dataBRT.getUTCHours()).padStart(2, '0');
+    const min = String(dataBRT.getUTCMinutes()).padStart(2, '0');
     
-    const prefixo = PREFIXO_ID_POR_ATIVO[labelAtivo] || labelAtivo.substring(0, 3).toUpperCase();
+    const prefixo = PREFIXO_ID_POR_ATIVO[labelAtivo] || labelAtivo.substring(0, 2).toUpperCase();
     const idGerado = `${prefixo}${yy}${mm}${dd}${hh}${min}`;
     
-    // Debug: verificar se está gerando corretamente
     if (idGerado.includes('NaN')) {
       console.error(`[ERRO ID] labelAtivo=${labelAtivo}, timestamp=${timestamp}, id=${idGerado}`);
     }
@@ -210,16 +202,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return idGerado;
   }
 
-  const FINNHUB_KEY = 'd6cv5e1r01qgk7mjtr4gd6cv5e1r01qgk7mjtr50';
-
-  async function temNoticiaAltoImpacto(labelAtivo: string): Promise<boolean> {
+  const temNoticiaAltoImpacto = async (labelAtivo: string): Promise<boolean> => {
     const moedas = MOEDAS_POR_ATIVO[labelAtivo] || [];
     if (moedas.length === 0) return false;
     try {
       const agora     = Math.floor(agoraUnix / 1000);
       const de        = agora - 3 * 3600;
       const ate       = agora + 3 * 3600;
-      const r = await fetch(`https://finnhub.io/api/v1/calendar/economic?from=${new Date(de*1000).toISOString().slice(0,10)}&to=${new Date(ate*1000).toISOString().slice(0,10)}&token=${FINNHUB_KEY}`, { signal: AbortSignal.timeout(3000) });
+      const r = await fetch(`https://finnhub.io/api/v1/calendar/economic?from=${new Date(de*1000).toISOString().slice(0,10)}&to=${new Date(ate*1000).toISOString().slice(0,10)}&token=d6cv5e1r01qgk7mjtr4gd6cv5e1r01qgk7mjtr50`, { signal: AbortSignal.timeout(3000) });
       const d = await r.json();
       const eventos = d?.economicCalendar || [];
       for (const evento of eventos) {
@@ -233,7 +223,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     } catch (_) { return false; }
     return false;
-  }
+  };
 
   function mercadoForexAberto(): boolean {
     const diaSem = new Date(agoraUnix).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo', weekday: 'long' });
@@ -242,21 +232,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const minutos  = hh * 60 + mm;
     const dia      = diaSem.toLowerCase();
     
-    // V121: Novos horários FOREX
-    // Segunda-feira → 00:00 às 23:59
-    // Terça-feira → 00:00 às 23:59
-    // Quarta-feira → 00:00 às 23:59
-    // Quinta-feira → 00:00 às 23:59
-    // Sexta-feira → 00:00 às 17:00
-    // Domingo → 21:00 às 00:00
-    // Fechado: Sexta (17:01-23:59), Sábado (todo dia), Domingo (00:00-20:59)
-    
     if (dia.includes('segunda') || dia.includes('terça') || dia.includes('quarta') || dia.includes('quinta')) return true;
-    if (dia.includes('sexta'))   return minutos <= 17 * 60;  // Até 17:00 (nova mudança)
-    if (dia.includes('domingo')) return minutos >= 21 * 60;  // A partir de 21:00 (nova mudança)
-    return false;  // Sábado sempre fechado
+    if (dia.includes('sexta'))   return minutos <= 17 * 60;
+    if (dia.includes('domingo')) return minutos >= 21 * 60;
+    return false;
   }
 
+  // ===========================================================================
+  // INDICADORES TÉCNICOS [M5]
+  // ===========================================================================
   function calcEMA(dados: any[], periodo: number, ate: number): number {
     const k = 2 / (periodo + 1);
     let ema = dados[0].c;
@@ -296,27 +280,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return soma / periodo;
   }
 
+  // ===========================================================================
+  // V122: BANDAS DE BOLLINGER (20, 2) [NOVO]
+  // ===========================================================================
+  function calcBollingerBands(dados: any[], ate: number, periodo: number = 20, desvios: number = 2): { sup: number; mid: number; inf: number } {
+    const slice = dados.slice(Math.max(0, ate - periodo + 1), ate + 1);
+    const media = slice.reduce((sum, v) => sum + v.c, 0) / slice.length;
+    const variancia = slice.reduce((sum, v) => sum + Math.pow(v.c - media, 2), 0) / slice.length;
+    const desvPad = Math.sqrt(variancia);
+    return {
+      sup: media + desvios * desvPad,
+      mid: media,
+      inf: media - desvios * desvPad,
+    };
+  }
+
   function selecionarVelaFechada(dados: any[]): { vela: any; idx: number } | null {
-    const quinzeMin = 15 * 60 * 1000;
     for (let i = dados.length - 1; i >= 1; i--) {
       const vela    = dados[i];
       const minVela = new Date(vela.t).getMinutes();
-      const diffSeg = (agoraUnix - (vela.t + quinzeMin)) / 1000;
-      if (minVela % 15 !== 0) continue;
+      const diffSeg = (agoraUnix - (vela.t + TIMEFRAME_MS)) / 1000;
+      if (minVela % 5 !== 0) continue;
       if (diffSeg < -5) continue;
       if (diffSeg > 40) return null;
       return { vela, idx: i };
     }
     return null;
-  }
-
-  // =============================================================================
-  // CORREÇÃO V119: normalizarIdVela — sem window.innerWidth
-  // =============================================================================
-  function normalizarIdVela(label: string, ts: number): string {
-    const quinzeMin = 15 * 60 * 1000;
-    const janelaNorm = Math.floor(ts / quinzeMin) * quinzeMin;
-    return `${label}_${janelaNorm}`;
   }
 
   function calcularScore(params: {
@@ -328,7 +317,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     semNoticia        : boolean;
   }): number {
     let score = 0;
-    // Redistribuição de pesos sem EMA200 (Total 100)
     if (params.cruzamento)   score += 30;
     if (params.rsiFavoravel) score += 20;
     if (params.mercadoForte) score += 15;
@@ -341,13 +329,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const logAtivos: string[] = [];
   const ativos = [
     { label: "Bitcoin", data: await getBTC(), prec: 2, isForex: false },
-    { label: "Ethereum", data: await getETH(), prec: 4, isForex: false },  // V121 NOVO - FIX NaN
-    { label: "EURUSD",  data: await getEURUSD(), prec: 5, isForex: true  },
-    { label: "USDJPY",  data: await getYahooForex("USDJPY=X", "USD/JPY"), prec: 5, isForex: true  },
-    { label: "GBPUSD",  data: await getYahooForex("GBPUSD=X", "GBP/USD"), prec: 5, isForex: true  },
-    { label: "AUDUSD",  data: await getYahooForex("AUDUSD=X", "AUD/USD"), prec: 5, isForex: true  },
-    { label: "USDCAD",  data: await getYahooForex("USDCAD=X", "USD/CAD"), prec: 5, isForex: true  },
-    { label: "USDCHF",  data: await getYahooForex("USDCHF=X", "USD/CHF"), prec: 5, isForex: true  },
+    { label: "Ethereum", data: await getETH(), prec: 4, isForex: false },
+    { label: "EUR/USD",  data: await getForexM5("EURUSD=X", "EUR/USD"), prec: 5, isForex: true },
+    { label: "USD/JPY",  data: await getForexM5("USDJPY=X", "USD/JPY"), prec: 3, isForex: true },
+    { label: "GBP/USD",  data: await getForexM5("GBPUSD=X", "GBP/USD"), prec: 5, isForex: true },
+    { label: "AUD/USD",  data: await getForexM5("AUDUSD=X", "AUD/USD"), prec: 5, isForex: true },
+    { label: "USD/CAD",  data: await getForexM5("USDCAD=X", "USD/CAD"), prec: 5, isForex: true },
+    { label: "USD/CHF",  data: await getForexM5("USDCHF=X", "USD/CHF"), prec: 5, isForex: true },
+    // V122 NOVOS ATIVOS
+    { label: "AUD/JPY",  data: await getForexM5("AUDJPY=X", "AUD/JPY"), prec: 3, isForex: true },
+    { label: "EUR/AUD",  data: await getForexM5("EURAUD=X", "EUR/AUD"), prec: 5, isForex: true },
+    { label: "EUR/CAD",  data: await getForexM5("EURCAD=X", "EUR/CAD"), prec: 5, isForex: true },
+    { label: "EUR/CHF",  data: await getForexM5("EURCHF=X", "EUR/CHF"), prec: 5, isForex: true },
+    { label: "EUR/GBP",  data: await getForexM5("EURGBP=X", "EUR/GBP"), prec: 5, isForex: true },
+    { label: "EUR/JPY",  data: await getForexM5("EURJPY=X", "EUR/JPY"), prec: 3, isForex: true },
+    { label: "GBP/AUD",  data: await getForexM5("GBPAUD=X", "GBP/AUD"), prec: 5, isForex: true },
+    { label: "GBP/JPY",  data: await getForexM5("GBPJPY=X", "GBP/JPY"), prec: 3, isForex: true },
   ];
 
   for (const ativo of ativos) {
@@ -356,12 +353,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       continue;
     }
     if (ativo.isForex && !mercadoForexAberto()) {
-      logAtivos.push(`[${ativo.label}] 🔒 Mercado FOREX FECHADO.`);
+      logAtivos.push(`[${ativo.label}] 🔒 FOREX FECHADO.`);
       continue;
     }
 
     const resultado = selecionarVelaFechada(ativo.data);
-    if (!resultado) { logAtivos.push(`[${ativo.label}] ⏳ Fora da janela de disparo.`); continue; }
+    if (!resultado) { logAtivos.push(`[${ativo.label}] ⏳ Fora da janela.`); continue; }
 
     const { vela, idx: i } = resultado;
     const tempoVelaStr = new Date(vela.t).toLocaleTimeString('pt-BR', optionsBR);
@@ -372,6 +369,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const ema21Prev  = calcEMA(ativo.data, 21,  i - 1);
     const rsi        = calcRSI(ativo.data, i, 14);
     const atr        = calcATR(ativo.data, i, 14);
+    const bb         = calcBollingerBands(ativo.data, i, 20, 2);  // V122 NOVO
 
     const cruzouAcima  = (ema9Prev <= ema21Prev) && (ema9Atual > ema21Atual);
     const cruzouAbaixo = (ema9Prev >= ema21Prev) && (ema9Atual < ema21Atual);
@@ -388,14 +386,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const mercadoForte  = distanciaEMAs > (atr * 0.35);
 
     const slice15 = ativo.data.slice(Math.max(0, i - 15), i);
-
-    // =============================================================================
-    // CORREÇÃO V119: Rompimento valida close (não apenas high/low)
-    // =============================================================================
-    const maiorTopo   = Math.max(...slice15.map((v: any) => v.h));
-    const menorFundo  = Math.min(...slice15.map((v: any) => v.l));
-    const rompeuTopo  = call ? (vela.c > maiorTopo && vela.c >= vela.o) : false;
-    const rompeuFundo = put  ? (vela.c < menorFundo && vela.c <= vela.o) : false;
+    const rompeuTopo  = call ? (vela.c > Math.max(...slice15.map((v: any) => v.h)) && vela.c >= vela.o) : false;
+    const rompeuFundo = put  ? (vela.c < Math.min(...slice15.map((v: any) => v.l)) && vela.c <= vela.o) : false;
     const rompimento  = rompeuTopo || rompeuFundo;
 
     let volumeForte = true;
@@ -409,7 +401,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const semNoticia = !temNoticia;
 
     const score = calcularScore({
-      cruzamento: call || put,
+      cruzamento: true,
       rsiFavoravel,
       mercadoForte,
       rompimento,
@@ -424,18 +416,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       continue;
     }
 
-    const sinalId = normalizarIdVela(ativo.label, vela.t);
-    if (cacheSinais[sinalId]) {
-      logAtivos.push(`[${ativo.label}] 🔄 Sinal duplicado bloqueado em ${tempoVelaStr}`);
-      continue;
-    }
+    const sinalId = `${ativo.label}_${vela.t}`;
+    if (cacheSinais[sinalId]) continue;
     cacheSinais[sinalId] = agoraUnix;
 
-    // ← V119 NOVO: Gerar ID com rastreabilidade completa
     const idRastreabilidade = gerarIdSinal(ativo.label, vela.t);
-
-    // ← V119 ATUALIZADO: Mensagem com ID para rastreabilidade
-    const msg = `${call ? "🟢" : "🔴"} <b>SINAL EMITIDO!</b>\n<b>ATIVO:</b> ${ativo.label}\n<b>SINAL:</b> ${call ? "↑ COMPRAR" : "↓ VENDER"}\n<b>ID:</b> ${idRastreabilidade}`;
+    const msg = `${call ? "🟢" : "🔴"} <b>SINAL EMITIDO!</b>\n<b>ATIVO:</b> ${ativo.label}\n<b>SINAL:</b> ${call ? "↑ COMPRAR" : "↓ VENDER"}\n<b>ID:</b> ${idRastreabilidade}\n<b>PREÇO:</b> $ ${vela.c.toFixed(ativo.prec)}\n<b>TP:</b> $ ${bb.sup.toFixed(ativo.prec)}\n<b>SL:</b> $ ${bb.inf.toFixed(ativo.prec)}`;
 
     try {
       await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
@@ -450,10 +436,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
         }),
       });
-      logAtivos.push(`[${ativo.label}] ✅ Enviado (ID: ${idRastreabilidade}) — ${scoreLog}`);
-    } catch (e) {
-      logAtivos.push(`[${ativo.label}] ❌ Falha ao enviar — ${scoreLog}`);
-    }
+      logAtivos.push(`[${ativo.label}] ✅ Enviado — ${scoreLog}`);
+    } catch (e) {}
   }
 
   const statusForex = mercadoForexAberto() ? "ABERTO" : "FECHADO";
@@ -461,16 +445,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   return res.status(200).send(`
     <!DOCTYPE html>
     <html lang="pt-BR">
-    <head><meta charset="UTF-8"><title>RICARDO SENTINELA BOT</title><style>body{background-color:#ffffff;color:#000000;font-family:sans-serif;padding:40px;line-height:1.5;}p{margin:10px 0;font-size:16px;}.verde{color:#008000;font-weight:bold;}.vermelho{color:#cc0000;font-weight:bold;}.log{margin-top:20px;font-size:13px;color:#444;font-family:monospace;max-height:500px;overflow-y:auto;border:1px solid #ddd;padding:10px;}</style></head>
+    <head><meta charset="UTF-8"><title>RICARDO SENTINELA BOT</title><style>body{background-color:#ffffff;color:#000000;font-family:sans-serif;padding:40px;line-height:1.5;}p{margin:10px 0;font-size:16px;}.verde{color:#008000;font-weight:bold;}.vermelho{color:#cc0000;font-weight:bold;}.log{margin-top:20px;font-size:13px;color:#444;font-family:monospace;}</style></head>
     <body>
       <p><b>RICARDO SENTINELA BOT</b></p>
       <p><b>STATUS:</b> <span class="verde">ATIVADO</span></p>
       <p><b>VERSÃO ATUAL:</b> ${versao}</p>
       <p><b>DATA DA REVISÃO:</b> ${dataRevisao}</p>
       <p><b>HORA DA REVISÃO:</b> ${horaRevisao}</p>
-      <p><b>HORA ATUAL (BRT):</b> ${horaBR}</p>
+      <p><b>TIMEFRAME:</b> <span class="verde">M5</span> (Alterado em V122)</p>
+      <p><b>ATIVOS MONITORADOS:</b> 16 (Bitcoin, Ethereum + 14 Forex)</p>
       <p><b>MERCADO FOREX:</b> <span class="${statusForex === 'ABERTO' ? 'verde' : 'vermelho'}">${statusForex}</span></p>
-      <div class="log"><p><b>LOG:</b></p>${logAtivos.map(l => `<p>${l}</p>`).join('') || '<p>Aguardando sinais...</p>'}</div>
+      <div class="log"><p><b>LOG:</b></p>${logAtivos.map(l => `<p>${l}</p>`).join('') || '<p>Aguardando...</p>'}</div>
       <script>setTimeout(() => location.reload(), 30000);</script>
     </body>
     </html>
