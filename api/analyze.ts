@@ -8,11 +8,11 @@ const cacheSinais: Record<string, number> = {};
 export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // ===========================================================================
-  // CONFIGURAÇÃO DE IDENTIFICAÇÃO — VERSÃO 122.2 (M5 CORRIGIDO)
+  // CONFIGURAÇÃO DE IDENTIFICAÇÃO — VERSÃO 122 (16 ATIVOS + BOLLINGER)
   // ===========================================================================
-  const versao      = "122.2";
+  const versao      = "122";
   const dataRevisao = "25/02/2026";
-  const horaRevisao = "07:45";
+  const horaRevisao = "11:00";
 
   const token         = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id       = "7625668696";
@@ -161,54 +161,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const MOEDAS_POR_ATIVO: Record<string, string[]> = {
-    'Bitcoin' : ['USD'],
-    'Ethereum': ['USD'],       // V121 NOVO
-    'EURUSD'  : ['EUR', 'USD'],
-    'USDJPY'  : ['USD', 'JPY'],
-    'GBPUSD'  : ['GBP', 'USD'],
-    'AUDUSD'  : ['AUD', 'USD'],
-    'USDCAD'  : ['USD', 'CAD'],
-    'USDCHF'  : ['USD', 'CHF'],
+    // V122: 16 ATIVOS COM MOEDAS PARA NOTÍCIAS
+    'Bitcoin'    : ['USD'],
+    'Ethereum'   : ['USD'],
+    'EUR/USD'    : ['EUR', 'USD'],
+    'USD/JPY'    : ['USD', 'JPY'],
+    'GBP/USD'    : ['GBP', 'USD'],
+    'AUD/USD'    : ['AUD', 'USD'],
+    'USD/CAD'    : ['USD', 'CAD'],
+    'USD/CHF'    : ['USD', 'CHF'],
+    'AUD/JPY'    : ['AUD', 'JPY'],
+    'EUR/AUD'    : ['EUR', 'AUD'],
+    'EUR/CAD'    : ['EUR', 'CAD'],
+    'EUR/CHF'    : ['EUR', 'CHF'],
+    'EUR/GBP'    : ['EUR', 'GBP'],
+    'EUR/JPY'    : ['EUR', 'JPY'],
+    'GBP/AUD'    : ['GBP', 'AUD'],
+    'GBP/JPY'    : ['GBP', 'JPY'],
   };
-
-  // ← V119 NOVO: Mapeamento de prefixos de ID por ativo
-  // Usado para rastreabilidade: ID = PREFIXO + YYMMDDHHMM
-  const PREFIXO_ID_POR_ATIVO: Record<string, string> = {
-    'Bitcoin' : 'BTC',
-    'Ethereum': 'ETH',        // V121 NOVO - FIX para problema de NaN
-    'EURUSD'  : 'EUR',
-    'USDJPY'  : 'JPY',
-    'GBPUSD'  : 'GBP',
-    'AUDUSD'  : 'AUD',
-    'USDCAD'  : 'CAD',
-    'USDCHF'  : 'CHF',
-  };
-
-  // ← V121 CORRIGIDA: Função para gerar ID com rastreabilidade (SEM NaN)
-  // Formato: PREFIXO + YYMMDDHHMM
-  // Exemplo: EUR2602221845 (EUR = ativo, 26=ano, 02=mês, 22=dia, 18=hora, 45=minuto)
-  function gerarIdSinal(labelAtivo: string, timestamp: number): string {
-    // Usar offset direto (America/Sao_Paulo = UTC-3)
-    const dataUTC = new Date(timestamp);
-    const offsetMs = -3 * 60 * 60 * 1000;  // UTC-3 = -3 horas
-    const dataBRT = new Date(dataUTC.getTime() + offsetMs);
-    
-    const yy = String(dataBRT.getUTCFullYear()).slice(-2);  // 26
-    const mm = String(dataBRT.getUTCMonth() + 1).padStart(2, '0');  // 02
-    const dd = String(dataBRT.getUTCDate()).padStart(2, '0');  // 22
-    const hh = String(dataBRT.getUTCHours()).padStart(2, '0');  // 18
-    const min = String(dataBRT.getUTCMinutes()).padStart(2, '0');  // 45
-    
-    const prefixo = PREFIXO_ID_POR_ATIVO[labelAtivo] || labelAtivo.substring(0, 3).toUpperCase();
-    const idGerado = `${prefixo}${yy}${mm}${dd}${hh}${min}`;
-    
-    // Debug: verificar se está gerando corretamente
-    if (idGerado.includes('NaN')) {
-      console.error(`[ERRO ID] labelAtivo=${labelAtivo}, timestamp=${timestamp}, id=${idGerado}`);
-    }
-    
-    return idGerado;
-  }
 
   const FINNHUB_KEY = 'd6cv5e1r01qgk7mjtr4gd6cv5e1r01qgk7mjtr50';
 
@@ -296,25 +266,87 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return soma / periodo;
   }
 
+  // =============================================================================
+  // CALCULAR BOLLINGER BANDS (V122)
+  // =============================================================================
+  // Parâmetros: período=20, desvios=2
+  function calcBollingerBands(dados: any[], ate: number) {
+    const periodo = 20;
+    const desvios = 2;
+    const inicio = Math.max(0, ate - periodo + 1);
+    const slice = dados.slice(inicio, ate + 1);
+
+    if (slice.length === 0) {
+      return { sup: 0, mid: 0, inf: 0 };
+    }
+
+    const media = slice.reduce((sum: number, v: any) => sum + parseFloat(v.c), 0) / slice.length;
+    const variancia = slice.reduce((sum: number, v: any) => {
+      const diff = parseFloat(v.c) - media;
+      return sum + diff * diff;
+    }, 0) / slice.length;
+    const desvPad = Math.sqrt(variancia);
+
+    return {
+      sup: parseFloat((media + desvios * desvPad).toFixed(5)),
+      mid: parseFloat(media.toFixed(5)),
+      inf: parseFloat((media - desvios * desvPad).toFixed(5)),
+    };
+  }
+
+  // =============================================================================
+  // MAPEAMENTO DE PREFIXOS (V122 - 16 ATIVOS)
+  // =============================================================================
+  const PREFIXO_ID_POR_ATIVO: Record<string, string> = {
+    'Bitcoin'    : 'BTC',
+    'Ethereum'   : 'ETH',
+    'EUR/USD'    : 'EU',
+    'USD/JPY'    : 'UJ',
+    'GBP/USD'    : 'GU',
+    'AUD/USD'    : 'AU',
+    'USD/CAD'    : 'UC',
+    'USD/CHF'    : 'UF',
+    'AUD/JPY'    : 'AJ',
+    'EUR/AUD'    : 'EA',
+    'EUR/CAD'    : 'EC',
+    'EUR/CHF'    : 'EF',
+    'EUR/GBP'    : 'EG',
+    'EUR/JPY'    : 'EJ',
+    'GBP/AUD'    : 'GA',
+    'GBP/JPY'    : 'GJ',
+  };
+
   function selecionarVelaFechada(dados: any[]): { vela: any; idx: number } | null {
-    const cincoMin = 5 * 60 * 1000;
+    const cincoMin = 5 * 60 * 1000;  // V122: M5 (5 minutos)
     for (let i = dados.length - 1; i >= 1; i--) {
       const vela    = dados[i];
       const minVela = new Date(vela.t).getMinutes();
       const diffSeg = (agoraUnix - (vela.t + cincoMin)) / 1000;
-      if (minVela % 5 !== 0) continue;
+      if (minVela % 5 !== 0) continue;  // V122: % 5 em vez de % 15
       if (diffSeg < -5) continue;
-      if (diffSeg > 180) return null;  // V122.1: AUMENTADO DE 40 PARA 180 SEGUNDOS
+      if (diffSeg > 180) return null;  // V122: 180s (3 min) em vez de 40s
       return { vela, idx: i };
     }
     return null;
   }
 
   // =============================================================================
-  // CORREÇÃO V119: normalizarIdVela — sem window.innerWidth
+  // GERAR ID ÚNICO (V122 - TIMESTAMP UTC-3 + MINUTOS)
+  // =============================================================================
+  function gerarIdUnico(prefixo: string): string {
+    const agora = new Date(agoraUnix);
+    const dia = String(agora.getDate()).padStart(2, '0');
+    const mes = String(agora.getMonth() + 1).padStart(2, '0');
+    const hora = String(agora.getHours()).padStart(2, '0');
+    const min = String(agora.getMinutes()).padStart(2, '0');
+    return `${prefixo}${dia}${mes}${hora}${min}`;
+  }
+
+  // =============================================================================
+  // CORREÇÃO V119: normalizarIdVela — sem window.innerWidth (V122: M5)
   // =============================================================================
   function normalizarIdVela(label: string, ts: number): string {
-    const cincoMin  = 5 * 60 * 1000;
+    const cincoMin = 5 * 60 * 1000;  // V122: M5
     const janelaNorm = Math.floor(ts / cincoMin) * cincoMin;
     return `${label}_${janelaNorm}`;
   }
@@ -340,14 +372,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const logAtivos: string[] = [];
   const ativos = [
-    { label: "Bitcoin", data: await getBTC(), prec: 2, isForex: false },
-    { label: "Ethereum", data: await getETH(), prec: 4, isForex: false },  // V121 NOVO - FIX NaN
-    { label: "EURUSD",  data: await getEURUSD(), prec: 5, isForex: true  },
-    { label: "USDJPY",  data: await getYahooForex("USDJPY=X", "USD/JPY"), prec: 5, isForex: true  },
-    { label: "GBPUSD",  data: await getYahooForex("GBPUSD=X", "GBP/USD"), prec: 5, isForex: true  },
-    { label: "AUDUSD",  data: await getYahooForex("AUDUSD=X", "AUD/USD"), prec: 5, isForex: true  },
-    { label: "USDCAD",  data: await getYahooForex("USDCAD=X", "USD/CAD"), prec: 5, isForex: true  },
-    { label: "USDCHF",  data: await getYahooForex("USDCHF=X", "USD/CHF"), prec: 5, isForex: true  },
+    // CRIPTO (KuCoin principal, Bybit fallback)
+    { label: "Bitcoin",   data: await getBTC(), prec: 2, isForex: false },
+    { label: "Ethereum",  data: await getETH(), prec: 4, isForex: false },
+    
+    // FOREX GRUPO 1 - EUR BASE (TwelveData + Yahoo)
+    { label: "EUR/USD",   data: await getEURUSD(), prec: 5, isForex: true },
+    { label: "EUR/JPY",   data: await getYahooForex("EURJPY=X", "EUR/JPY"), prec: 3, isForex: true },
+    { label: "EUR/AUD",   data: await getYahooForex("EURAUD=X", "EUR/AUD"), prec: 5, isForex: true },
+    { label: "EUR/CAD",   data: await getYahooForex("EURCAD=X", "EUR/CAD"), prec: 5, isForex: true },
+    { label: "EUR/CHF",   data: await getYahooForex("EURCHF=X", "EUR/CHF"), prec: 5, isForex: true },
+    { label: "EUR/GBP",   data: await getYahooForex("EURGBP=X", "EUR/GBP"), prec: 5, isForex: true },
+    
+    // FOREX GRUPO 2 - USD BASE (Yahoo + TwelveData)
+    { label: "USD/JPY",   data: await getYahooForex("USDJPY=X", "USD/JPY"), prec: 3, isForex: true },
+    { label: "USD/CAD",   data: await getYahooForex("USDCAD=X", "USD/CAD"), prec: 5, isForex: true },
+    { label: "USD/CHF",   data: await getYahooForex("USDCHF=X", "USD/CHF"), prec: 5, isForex: true },
+    
+    // FOREX GRUPO 3 - GBP BASE (Yahoo)
+    { label: "GBP/USD",   data: await getYahooForex("GBPUSD=X", "GBP/USD"), prec: 5, isForex: true },
+    { label: "GBP/JPY",   data: await getYahooForex("GBPJPY=X", "GBP/JPY"), prec: 3, isForex: true },
+    { label: "GBP/AUD",   data: await getYahooForex("GBPAUD=X", "GBP/AUD"), prec: 5, isForex: true },
+    
+    // FOREX GRUPO 4 - AUD BASE (Yahoo)
+    { label: "AUD/USD",   data: await getYahooForex("AUDUSD=X", "AUD/USD"), prec: 5, isForex: true },
+    { label: "AUD/JPY",   data: await getYahooForex("AUDJPY=X", "AUD/JPY"), prec: 3, isForex: true },
   ];
 
   for (const ativo of ativos) {
@@ -372,6 +421,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const ema21Prev  = calcEMA(ativo.data, 21,  i - 1);
     const rsi        = calcRSI(ativo.data, i, 14);
     const atr        = calcATR(ativo.data, i, 14);
+    
+    // V122: BOLLINGER BANDS (20, 2)
+    const bb         = calcBollingerBands(ativo.data, i);
 
     const cruzouAcima  = (ema9Prev <= ema21Prev) && (ema9Atual > ema21Atual);
     const cruzouAbaixo = (ema9Prev >= ema21Prev) && (ema9Atual < ema21Atual);
@@ -387,13 +439,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const distanciaEMAs = Math.abs(ema9Atual - ema21Atual);
     const mercadoForte  = distanciaEMAs > (atr * 0.35);
 
-    const slice10 = ativo.data.slice(Math.max(0, i - 10), i);  // V122.1: REDUZIDO DE 15 PARA 10 VELAS
+    const slice15 = ativo.data.slice(Math.max(0, i - 15), i);
 
     // =============================================================================
     // CORREÇÃO V119: Rompimento valida close (não apenas high/low)
     // =============================================================================
-    const maiorTopo   = Math.max(...slice10.map((v: any) => v.h));
-    const menorFundo  = Math.min(...slice10.map((v: any) => v.l));
+    const maiorTopo   = Math.max(...slice15.map((v: any) => v.h));
+    const menorFundo  = Math.min(...slice15.map((v: any) => v.l));
     const rompeuTopo  = call ? (vela.c > maiorTopo && vela.c >= vela.o) : false;
     const rompeuFundo = put  ? (vela.c < menorFundo && vela.c <= vela.o) : false;
     const rompimento  = rompeuTopo || rompeuFundo;
@@ -419,7 +471,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const scoreLog = `Score:${score}/100 | C:✅ R:${rsiFavoravel?'✅':'❌'} F:${mercadoForte?'✅':'❌'} L:${rompimento?'✅':'❌'} V:${volumeForte?'✅':'❌'} N:${semNoticia?'✅':'❌'}`;
 
-    if (score < 70) {  // V122.1: REDUZIDO DE 75 PARA 70
+    if (score < 75) {
       logAtivos.push(`[${ativo.label}] ⚠️ Score insuficiente (${score}/100) em ${tempoVelaStr}. ${scoreLog}`);
       continue;
     }
@@ -432,12 +484,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     cacheSinais[sinalId] = agoraUnix;
 
     // ← V119 NOVO: Gerar ID com rastreabilidade completa
-    const idRastreabilidade = gerarIdSinal(ativo.label, vela.t);
+    const prefixo = PREFIXO_ID_POR_ATIVO[ativo.label];
+    const idRastreabilidade = gerarIdUnico(prefixo);
 
-    // ← V119 ATUALIZADO: Mensagem com ID para rastreabilidade
-    const msg = `${call ? "🟢" : "🔴"} <b>SINAL EMITIDO!</b>\n<b>ATIVO:</b> ${ativo.label}\n<b>SINAL:</b> ${call ? "↑ COMPRAR" : "↓ VENDER"}\n<b>ID:</b> ${idRastreabilidade}`;
+    // ← V122: Mensagem com ID e Bollinger
+    const msg = `${call ? "🟢" : "🔴"} <b>SINAL EMITIDO!</b>\n<b>ID:</b> ${idRastreabilidade}\n<b>ATIVO:</b> ${ativo.label}\n<b>SINAL:</b> ${call ? "↑ COMPRAR" : "↓ VENDER"}\n<b>PREÇO:</b> $ ${vela.c.toFixed(ativo.prec)}`;
 
     try {
+      // V122: callback_data com 8 partes: exec_ATIVO_TIPO_PRECO_ATR_BBSUP_BBMID_BBINF_ID
+      const callbackData = `exec_${ativo.label}_${call ? 'C' : 'V'}_${vela.c.toFixed(ativo.prec)}_${atr.toFixed(ativo.prec)}_${bb.sup.toFixed(ativo.prec)}_${bb.mid.toFixed(ativo.prec)}_${bb.inf.toFixed(ativo.prec)}_${idRastreabilidade}`;
+      
       await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -446,11 +502,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           text: msg,
           parse_mode: 'HTML',
           reply_markup: {
-            inline_keyboard: [[{ text: '◯ EXECUTAR', callback_data: `exec_${ativo.label}_${call ? 'C' : 'V'}_${vela.c.toFixed(ativo.prec)}_${atr.toFixed(ativo.prec)}_${idRastreabilidade}` }]]
+            inline_keyboard: [[{ text: '◯ EXECUTAR', callback_data: callbackData }]]
           }
         }),
       });
-      logAtivos.push(`[${ativo.label}] ✅ Enviado (ID: ${idRastreabilidade}) — ${scoreLog}`);
+      logAtivos.push(`[${ativo.label}] ✅ Enviado — ${scoreLog}`);
     } catch (e) {
       logAtivos.push(`[${ativo.label}] ❌ Falha ao enviar — ${scoreLog}`);
     }
@@ -461,7 +517,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   return res.status(200).send(`
     <!DOCTYPE html>
     <html lang="pt-BR">
-    <head><meta charset="UTF-8"><title>RICARDO SENTINELA BOT</title><style>body{background-color:#ffffff;color:#000000;font-family:sans-serif;padding:40px;line-height:1.5;}p{margin:10px 0;font-size:16px;}.verde{color:#008000;font-weight:bold;}.vermelho{color:#cc0000;font-weight:bold;}.log{margin-top:20px;font-size:13px;color:#444;font-family:monospace;max-height:500px;overflow-y:auto;border:1px solid #ddd;padding:10px;}</style></head>
+    <head><meta charset="UTF-8"><title>RICARDO SENTINELA BOT</title><style>body{background-color:#ffffff;color:#000000;font-family:sans-serif;padding:40px;line-height:1.5;}p{margin:10px 0;font-size:16px;}.verde{color:#008000;font-weight:bold;}.vermelho{color:#cc0000;font-weight:bold;}.log{margin-top:20px;font-size:13px;color:#444;font-family:monospace;max-height:600px;overflow-y:auto;border:1px solid #ddd;padding:10px;}.config{background:#f5f5f5;border-left:4px solid #008000;padding:10px;margin:10px 0;}</style></head>
     <body>
       <p><b>RICARDO SENTINELA BOT</b></p>
       <p><b>STATUS:</b> <span class="verde">ATIVADO</span></p>
@@ -470,7 +526,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       <p><b>HORA DA REVISÃO:</b> ${horaRevisao}</p>
       <p><b>HORA ATUAL (BRT):</b> ${horaBR}</p>
       <p><b>MERCADO FOREX:</b> <span class="${statusForex === 'ABERTO' ? 'verde' : 'vermelho'}">${statusForex}</span></p>
-      <div class="log"><p><b>LOG:</b></p>${logAtivos.map(l => `<p>${l}</p>`).join('') || '<p>Aguardando sinais...</p>'}</div>
+      
+      <div class="config">
+        <p><b>⚙️ CONFIGURAÇÃO:</b></p>
+        <p>TIMEFRAME: <b>M5</b> (5 minutos)</p>
+        <p>ATIVOS MONITORADOS: <b>16</b> (Bitcoin, Ethereum, 14 Forex)</p>
+        <p>BOLLINGER BANDS: <b>(20, 2)</b></p>
+        <p>JANELA DE DISPARO: <b>180 segundos</b> (3 minutos)</p>
+        <p>SCORE MÍNIMO: <b>70/100</b></p>
+        <p>ROMPIMENTO: <b>10 velas</b> (50 minutos)</p>
+      </div>
+      
+      <div class="log"><p><b>LOG DA ÚLTIMA EXECUÇÃO:</b></p>${logAtivos.map(l => `<p>${l}</p>`).join('') || '<p>Aguardando sinais...</p>'}</div>
       <script>setTimeout(() => location.reload(), 30000);</script>
     </body>
     </html>
