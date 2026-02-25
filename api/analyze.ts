@@ -8,11 +8,11 @@ const cacheSinais: Record<string, number> = {};
 export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // ===========================================================================
-  // CONFIGURAÇÃO DE IDENTIFICAÇÃO — VERSÃO 122 (CORRIGIDO)
+  // CONFIGURAÇÃO DE IDENTIFICAÇÃO — VERSÃO 122.1 (OTIMIZADO M5)
   // ===========================================================================
-  const versao      = "122";
-  const dataRevisao = "24/02/2026";
-  const horaRevisao = "23:00";
+  const versao      = "122.1";
+  const dataRevisao = "25/02/2026";
+  const horaRevisao = "06:30";
 
   const token         = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id       = "7625668696";
@@ -158,7 +158,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // ===========================================================================
-  // MOEDAS E PREFIXOS POR ATIVO (V4.5.9 - 16 ATIVOS)
+  // MOEDAS E PREFIXOS POR ATIVO (V122 - 16 ATIVOS)
   // ===========================================================================
   const MOEDAS_POR_ATIVO: Record<string, string[]> = {
     'Bitcoin'    : ['USD'],
@@ -169,7 +169,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     'AUD/USD'    : ['AUD', 'USD'],
     'USD/CAD'    : ['USD', 'CAD'],
     'USD/CHF'    : ['USD', 'CHF'],
-    // V4.5.9: 8 NOVOS ATIVOS
     'AUD/JPY'    : ['AUD', 'JPY'],
     'EUR/AUD'    : ['EUR', 'AUD'],
     'EUR/CAD'    : ['EUR', 'CAD'],
@@ -189,7 +188,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     'AUD/USD'    : 'AU',
     'USD/CAD'    : 'UC',
     'USD/CHF'    : 'UF',
-    // V4.5.9: 8 NOVOS ATIVOS COM PREFIXOS CORRETOS
     'AUD/JPY'    : 'AJ',
     'EUR/AUD'    : 'EA',
     'EUR/CAD'    : 'EC',
@@ -201,7 +199,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   };
 
   // ===========================================================================
-  // GERADOR DE ID (V4.5.9 - COM PREFIXOS CORRETOS)
+  // GERADOR DE ID (V122 - COM PREFIXOS CORRETOS)
   // ===========================================================================
   function gerarIdSinal(labelAtivo: string, timestamp: number): string {
     const prefixo = PREFIXO_ID_POR_ATIVO[labelAtivo] || labelAtivo.substring(0, 2).toUpperCase();
@@ -246,8 +244,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const minutos  = hh * 60 + mm;
     const dia      = diaSem.toLowerCase();
     if (dia.includes('segunda') || dia.includes('terça') || dia.includes('quarta') || dia.includes('quinta')) return true;
-    if (dia.includes('sexta'))   return minutos <= 17 * 60;  // Sexta até 17:00
-    if (dia.includes('domingo')) return minutos >= 21 * 60;  // Domingo a partir 21:00
+    if (dia.includes('sexta'))   return minutos <= 17 * 60;
+    if (dia.includes('domingo')) return minutos >= 21 * 60;
     return false;
   }
 
@@ -302,6 +300,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return soma / periodo;
   }
 
+  // =============================================================================
+  // SELEÇÃO DE VELA FECHADA — V122.1 OTIMIZADO (JANELA 180s)
+  // =============================================================================
   function selecionarVelaFechada(dados: any[]): { vela: any; idx: number } | null {
     const cincoMin = 5 * 60 * 1000;
     for (let i = dados.length - 1; i >= 1; i--) {
@@ -310,7 +311,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const diffSeg = (agoraUnix - (vela.t + cincoMin)) / 1000;
       if (minVela % 5 !== 0) continue;
       if (diffSeg < -5) continue;
-      if (diffSeg > 40) return null;
+      if (diffSeg > 180) return null;  // V122.1: AUMENTADO DE 40 PARA 180 SEGUNDOS (3 MINUTOS)
       return { vela, idx: i };
     }
     return null;
@@ -350,7 +351,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     { label: "AUD/USD",   data: await getYahooForex("AUDUSD=X", "AUD/USD"), prec: 5, isForex: true  },
     { label: "USD/CAD",   data: await getYahooForex("USDCAD=X", "USD/CAD"), prec: 5, isForex: true  },
     { label: "USD/CHF",   data: await getYahooForex("USDCHF=X", "USD/CHF"), prec: 5, isForex: true  },
-    // V4.5.9: 8 NOVOS ATIVOS
     { label: "AUD/JPY",   data: await getYahooForex("AUDJPY=X", "AUD/JPY"), prec: 3, isForex: true  },
     { label: "EUR/AUD",   data: await getYahooForex("EURAUD=X", "EUR/AUD"), prec: 5, isForex: true  },
     { label: "EUR/CAD",   data: await getYahooForex("EURCAD=X", "EUR/CAD"), prec: 5, isForex: true  },
@@ -399,9 +399,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const distanciaEMAs = Math.abs(ema9Atual - ema21Atual);
     const mercadoForte  = distanciaEMAs > (atr * 0.35);
 
-    const slice15 = ativo.data.slice(Math.max(0, i - 15), i);
-    const rompeuTopo  = call ? (vela.c > Math.max(...slice15.map((v: any) => v.h))) : false;
-    const rompeuFundo = put  ? (vela.c < Math.min(...slice15.map((v: any) => v.l))) : false;
+    // V122.1: REDUZIDO DE 15 PARA 10 VELAS
+    const slice10 = ativo.data.slice(Math.max(0, i - 10), i);
+    const rompeuTopo  = call ? (vela.c > Math.max(...slice10.map((v: any) => v.h))) : false;
+    const rompeuFundo = put  ? (vela.c < Math.min(...slice10.map((v: any) => v.l))) : false;
     const rompimento  = rompeuTopo || rompeuFundo;
 
     let volumeForte = true;
@@ -425,7 +426,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const scoreLog = `Score:${score}/100 | C:✅ R:${rsiFavoravel?'✅':'❌'} F:${mercadoForte?'✅':'❌'} L:${rompimento?'✅':'❌'} V:${volumeForte?'✅':'❌'} N:${semNoticia?'✅':'❌'}`;
 
-    if (score < 75) {
+    // V122.1: REDUZIDO DE 75 PARA 70
+    if (score < 70) {
       logAtivos.push(`[${ativo.label}] ⚠️ Score insuficiente (${score}/100) em ${tempoVelaStr}. ${scoreLog}`);
       continue;
     }
@@ -434,10 +436,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (cacheSinais[sinalId]) continue;
     cacheSinais[sinalId] = agoraUnix;
 
-    // V4.5.9: ID GERADO CORRETAMENTE COM PREFIXOS
     const idRastreabilidade = gerarIdSinal(ativo.label, vela.t);
 
-    // V4.5.9: FORMATO CORRETO COM ID NA MENSAGEM
     const msg = `${call ? "🟢" : "🔴"} <b>SINAL EMITIDO!</b>
 <b>ATIVO:</b> ${ativo.label}
 <b>SINAL:</b> ${call ? "↑ COMPRAR" : "↓ VENDER"}
@@ -473,6 +473,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       <p><b>DATA DA REVISÃO:</b> ${dataRevisao}</p>
       <p><b>HORA DA REVISÃO:</b> ${horaRevisao}</p>
       <p><b>MERCADO FOREX:</b> <span class="${statusForex === 'ABERTO' ? 'verde' : 'vermelho'}">${statusForex}</span></p>
+      <p><b>TIMEFRAME:</b> M5 (5 minutos)</p>
+      <p><b>JANELA DE DISPARO:</b> 180 segundos (3 minutos) ← V122.1</p>
+      <p><b>SCORE MÍNIMO:</b> 70/100 ← V122.1 (era 75)</p>
+      <p><b>ROMPIMENTO:</b> 10 velas (50 minutos) ← V122.1 (era 15)</p>
       <div class="log"><p><b>LOG:</b></p>${logAtivos.map(l => `<p>${l}</p>`).join('') || '<p>Aguardando...</p>'}</div>
       <script>setTimeout(() => location.reload(), 30000);</script>
     </body>
