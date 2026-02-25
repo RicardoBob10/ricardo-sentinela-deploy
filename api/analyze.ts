@@ -331,15 +331,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // =============================================================================
-  // GERAR ID ÚNICO (V122 - TIMESTAMP UTC-3 + MINUTOS)
+  // GERAR ID ÚNICO (V122 - CORREÇÃO: YYMMDDHHMI)
   // =============================================================================
   function gerarIdUnico(prefixo: string): string {
     const agora = new Date(agoraUnix);
-    const dia = String(agora.getDate()).padStart(2, '0');
-    const mes = String(agora.getMonth() + 1).padStart(2, '0');
-    const hora = String(agora.getHours()).padStart(2, '0');
-    const min = String(agora.getMinutes()).padStart(2, '0');
-    return `${prefixo}${dia}${mes}${hora}${min}`;
+    const yy = String(agora.getFullYear()).slice(-2);  // 26 (2026)
+    const mm = String(agora.getMonth() + 1).padStart(2, '0');  // 02 (Fevereiro)
+    const dd = String(agora.getDate()).padStart(2, '0');  // 22 (Dia)
+    const hh = String(agora.getHours()).padStart(2, '0');  // 18 (Hora)
+    const mi = String(agora.getMinutes()).padStart(2, '0');  // 50 (Minuto)
+    return `${prefixo}${yy}${mm}${dd}${hh}${mi}`;
   }
 
   // =============================================================================
