@@ -8,11 +8,29 @@ const cacheSinais: Record<string, number> = {};
 export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // ===========================================================================
-  // CONFIGURAÇÃO DE IDENTIFICAÇÃO — VERSÃO 123 (V121 BASE + V122 MELHORIAS)
+  // TIMEOUT GLOBAL: Garante resposta em 50s (Vercel = 60s)
+  // Qualquer coisa que demore mais é abortada
   // ===========================================================================
-  const versao      = "123";
+  const globalTimeout = setTimeout(() => {
+    if (!res.headersSent) {
+      res.status(200).send(`
+        <!DOCTYPE html><html><head><meta charset="UTF-8"><title>RICARDO SENTINELA BOT</title></head>
+        <body style="font-family:sans-serif;padding:40px;"><p><b>RICARDO SENTINELA BOT</b></p>
+        <p><b>STATUS:</b> <span style="color:#008000">ATIVADO</span></p>
+        <p><b>VERSÃO:</b> 123.3 (Timeout global acionado - dados incompletos)</p>
+        <p>Análise em andamento. Dashboard funciona. Sinais podem estar sendo processados.</p>
+        </body></html>
+      `);
+    }
+    clearTimeout(globalTimeout);
+  }, 50000);  // 50 segundos
+
+  // ===========================================================================
+  // CONFIGURAÇÃO DE IDENTIFICAÇÃO — VERSÃO 123.3 (OTIMIZADO COMPLETO)
+  // ===========================================================================
+  const versao      = "123.3";
   const dataRevisao = "25/02/2026";
-  const horaRevisao = "13:15";
+  const horaRevisao = "23:55";
 
   const token         = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id       = "7625668696";
@@ -29,7 +47,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     try {
       const endAt   = Math.floor(Date.now() / 1000);
       const startAt = endAt - 500 * 300;  // V122: 500 velas × 5min = M5
-      const r = await fetch(`https://api.kucoin.com/api/v1/market/candles?symbol=BTC-USDT&type=5min&startAt=${startAt}&endAt=${endAt}`, { signal: AbortSignal.timeout(4000) });
+      const r = await fetch(`https://api.kucoin.com/api/v1/market/candles?symbol=BTC-USDT&type=5min&startAt=${startAt}&endAt=${endAt}`, { signal: AbortSignal.timeout(2000) });
       const d = await r.json();
       if (d?.data && Array.isArray(d.data) && d.data.length > 0) {
         return d.data
@@ -45,7 +63,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     } catch (_) {}
     try {
-      const r = await fetch(`https://api.bybit.com/v5/market/kline?category=spot&symbol=BTCUSDT&interval=5&limit=500`, { signal: AbortSignal.timeout(4000) });
+      const r = await fetch(`https://api.bybit.com/v5/market/kline?category=spot&symbol=BTCUSDT&interval=5&limit=500`, { signal: AbortSignal.timeout(2000) });
       const d = await r.json();
       if (d?.result?.list && Array.isArray(d.result.list)) {
         return d.result.list
@@ -70,7 +88,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     try {
       const endAt   = Math.floor(Date.now() / 1000);
       const startAt = endAt - 500 * 300;  // V122: M5
-      const r = await fetch(`https://api.kucoin.com/api/v1/market/candles?symbol=ETH-USDT&type=5min&startAt=${startAt}&endAt=${endAt}`, { signal: AbortSignal.timeout(4000) });
+      const r = await fetch(`https://api.kucoin.com/api/v1/market/candles?symbol=ETH-USDT&type=5min&startAt=${startAt}&endAt=${endAt}`, { signal: AbortSignal.timeout(2000) });
       const d = await r.json();
       if (d?.data && Array.isArray(d.data) && d.data.length > 0) {
         return d.data
@@ -86,7 +104,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     } catch (_) {}
     try {
-      const r = await fetch(`https://api.bybit.com/v5/market/kline?category=spot&symbol=ETHUSDT&interval=5&limit=500`, { signal: AbortSignal.timeout(4000) });
+      const r = await fetch(`https://api.bybit.com/v5/market/kline?category=spot&symbol=ETHUSDT&interval=5&limit=500`, { signal: AbortSignal.timeout(2000) });
       const d = await r.json();
       if (d?.result?.list && Array.isArray(d.result.list)) {
         return d.result.list
@@ -109,7 +127,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // ===========================================================================
   async function getEURUSD(): Promise<any[] | null> {
     try {
-      const r = await fetch(`https://api.twelvedata.com/time_series?symbol=EUR/USD&interval=5min&outputsize=500&apikey=${twelveDataKey}`, { signal: AbortSignal.timeout(4000) });
+      const r = await fetch(`https://api.twelvedata.com/time_series?symbol=EUR/USD&interval=5min&outputsize=500&apikey=${twelveDataKey}`, { signal: AbortSignal.timeout(2000) });
       const d = await r.json();
       if (d?.values && Array.isArray(d.values) && d.values.length > 0) {
         return d.values
@@ -119,7 +137,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     } catch (_) {}
     try {
-      const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/EURUSD=X?interval=5m&range=60d`, { signal: AbortSignal.timeout(4000) });
+      const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/EURUSD=X?interval=5m&range=60d`, { signal: AbortSignal.timeout(2000) });
       const d = await r.json();
       const chart = d?.chart?.result?.[0];
       if (chart) {
@@ -137,7 +155,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // ===========================================================================
   async function getYahooForex(yahooSymbol: string, tdSymbol: string): Promise<any[] | null> {
     try {
-      const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${yahooSymbol}?interval=5m&range=60d`, { signal: AbortSignal.timeout(4000) });
+      const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${yahooSymbol}?interval=5m&range=60d`, { signal: AbortSignal.timeout(2000) });
       const d = await r.json();
       const chart = d?.chart?.result?.[0];
       if (chart && chart.timestamp && chart.indicators?.quote?.[0]) {
@@ -148,7 +166,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     } catch (_) {}
     try {
-      const r = await fetch(`https://api.twelvedata.com/time_series?symbol=${tdSymbol}&interval=5min&outputsize=500&apikey=${twelveDataKey}`, { signal: AbortSignal.timeout(4000) });
+      const r = await fetch(`https://api.twelvedata.com/time_series?symbol=${tdSymbol}&interval=5min&outputsize=500&apikey=${twelveDataKey}`, { signal: AbortSignal.timeout(2000) });
       const d = await r.json();
       if (d?.values && Array.isArray(d.values) && d.values.length > 0) {
         return d.values
@@ -212,7 +230,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const agora     = Math.floor(agoraUnix / 1000);
       const de        = agora - 3 * 3600;
       const ate       = agora + 3 * 3600;
-      const r = await fetch(`https://finnhub.io/api/v1/calendar/economic?from=${new Date(de*1000).toISOString().slice(0,10)}&to=${new Date(ate*1000).toISOString().slice(0,10)}&token=${FINNHUB_KEY}`, { signal: AbortSignal.timeout(3000) });
+      const r = await fetch(`https://finnhub.io/api/v1/calendar/economic?from=${new Date(de*1000).toISOString().slice(0,10)}&to=${new Date(ate*1000).toISOString().slice(0,10)}&token=${FINNHUB_KEY}`, { signal: AbortSignal.timeout(1500) });
       const d = await r.json();
       const eventos = d?.economicCalendar || [];
       for (const evento of eventos) {
@@ -512,6 +530,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const statusForex = mercadoForexAberto() ? "ABERTO" : "FECHADO";
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  
+  // Limpar timeout global (resposta enviada com sucesso)
+  clearTimeout(globalTimeout);
+  
   return res.status(200).send(`
     <!DOCTYPE html>
     <html lang="pt-BR">
