@@ -1,10 +1,21 @@
 {
   "name": "ricardo-sentinela",
-  "version": "1.0.0",
-  "type": "module",
+  "version": "125.0.0",
+  "description": "Ricardo Sentinela Bot",
   "main": "api/analyze.ts",
+  "type": "module",
+  "engines": {
+    "node": "22.22.0"
+  },
+  "scripts": {
+    "start": "node --loader ts-node/esm api/analyze.ts",
+    "dev": "node --loader ts-node/esm api/analyze.ts"
+  },
   "dependencies": {
-    "@vercel/node": "^3.0.0",
-    "node-fetch": "^3.3.2"
+    "@vercel/node": "^3.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "ts-node": "^10.0.0"
   }
 }
