@@ -352,32 +352,53 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const logAtivos: string[] = [];
   
+  // V123 FIXADO: Requisições em PARALELO com Promise.all() em vez de sequencial
+  // Isso reduz 60+ segundos para ~4-5 segundos!
+  const [btcData, ethData, eurUsdData, eurJpyData, eurAudData, eurCadData, eurChfData, eurGbpData, usdJpyData, usdCadData, usdChfData, gbpUsdData, gbpJpyData, gbpAudData, audUsdData, audJpyData] = await Promise.all([
+    getBTC(),
+    getETH(),
+    getEURUSD(),
+    getYahooForex("EURJPY=X", "EUR/JPY"),
+    getYahooForex("EURAUD=X", "EUR/AUD"),
+    getYahooForex("EURCAD=X", "EUR/CAD"),
+    getYahooForex("EURCHF=X", "EUR/CHF"),
+    getYahooForex("EURGBP=X", "EUR/GBP"),
+    getYahooForex("USDJPY=X", "USD/JPY"),
+    getYahooForex("USDCAD=X", "USD/CAD"),
+    getYahooForex("USDCHF=X", "USD/CHF"),
+    getYahooForex("GBPUSD=X", "GBP/USD"),
+    getYahooForex("GBPJPY=X", "GBP/JPY"),
+    getYahooForex("GBPAUD=X", "GBP/AUD"),
+    getYahooForex("AUDUSD=X", "AUD/USD"),
+    getYahooForex("AUDJPY=X", "AUD/JPY"),
+  ]);
+
   // V122: 16 ATIVOS (Bitcoin, Ethereum, 14 Forex)
   const ativos = [
-    { label: "Bitcoin",   data: await getBTC(), prec: 2, isForex: false },
-    { label: "Ethereum",  data: await getETH(), prec: 4, isForex: false },
+    { label: "Bitcoin",   data: btcData, prec: 2, isForex: false },
+    { label: "Ethereum",  data: ethData, prec: 4, isForex: false },
     
     // FOREX GRUPO 1 - EUR BASE
-    { label: "EUR/USD",   data: await getEURUSD(), prec: 5, isForex: true },
-    { label: "EUR/JPY",   data: await getYahooForex("EURJPY=X", "EUR/JPY"), prec: 3, isForex: true },
-    { label: "EUR/AUD",   data: await getYahooForex("EURAUD=X", "EUR/AUD"), prec: 5, isForex: true },
-    { label: "EUR/CAD",   data: await getYahooForex("EURCAD=X", "EUR/CAD"), prec: 5, isForex: true },
-    { label: "EUR/CHF",   data: await getYahooForex("EURCHF=X", "EUR/CHF"), prec: 5, isForex: true },
-    { label: "EUR/GBP",   data: await getYahooForex("EURGBP=X", "EUR/GBP"), prec: 5, isForex: true },
+    { label: "EUR/USD",   data: eurUsdData, prec: 5, isForex: true },
+    { label: "EUR/JPY",   data: eurJpyData, prec: 3, isForex: true },
+    { label: "EUR/AUD",   data: eurAudData, prec: 5, isForex: true },
+    { label: "EUR/CAD",   data: eurCadData, prec: 5, isForex: true },
+    { label: "EUR/CHF",   data: eurChfData, prec: 5, isForex: true },
+    { label: "EUR/GBP",   data: eurGbpData, prec: 5, isForex: true },
     
     // FOREX GRUPO 2 - USD BASE
-    { label: "USD/JPY",   data: await getYahooForex("USDJPY=X", "USD/JPY"), prec: 3, isForex: true },
-    { label: "USD/CAD",   data: await getYahooForex("USDCAD=X", "USD/CAD"), prec: 5, isForex: true },
-    { label: "USD/CHF",   data: await getYahooForex("USDCHF=X", "USD/CHF"), prec: 5, isForex: true },
+    { label: "USD/JPY",   data: usdJpyData, prec: 3, isForex: true },
+    { label: "USD/CAD",   data: usdCadData, prec: 5, isForex: true },
+    { label: "USD/CHF",   data: usdChfData, prec: 5, isForex: true },
     
     // FOREX GRUPO 3 - GBP BASE
-    { label: "GBP/USD",   data: await getYahooForex("GBPUSD=X", "GBP/USD"), prec: 5, isForex: true },
-    { label: "GBP/JPY",   data: await getYahooForex("GBPJPY=X", "GBP/JPY"), prec: 3, isForex: true },
-    { label: "GBP/AUD",   data: await getYahooForex("GBPAUD=X", "GBP/AUD"), prec: 5, isForex: true },
+    { label: "GBP/USD",   data: gbpUsdData, prec: 5, isForex: true },
+    { label: "GBP/JPY",   data: gbpJpyData, prec: 3, isForex: true },
+    { label: "GBP/AUD",   data: gbpAudData, prec: 5, isForex: true },
     
     // FOREX GRUPO 4 - AUD BASE
-    { label: "AUD/USD",   data: await getYahooForex("AUDUSD=X", "AUD/USD"), prec: 5, isForex: true },
-    { label: "AUD/JPY",   data: await getYahooForex("AUDJPY=X", "AUD/JPY"), prec: 3, isForex: true },
+    { label: "AUD/USD",   data: audUsdData, prec: 5, isForex: true },
+    { label: "AUD/JPY",   data: audJpyData, prec: 3, isForex: true },
   ];
 
   for (const ativo of ativos) {
