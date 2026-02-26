@@ -7,20 +7,30 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
   return res.status(200).send(`
     <!DOCTYPE html>
     <html lang="pt-BR">
-    <head>
-      <meta charset="UTF-8">
-      <title>TESTE</title>
-      <style>
-        body { background: #fff; color: #000; font-family: Arial; padding: 40px; }
-        .ok { color: #00aa00; font-weight: bold; font-size: 32px; }
-      </style>
-    </head>
+    <head><meta charset="UTF-8"><title>TESTE</title></head>
     <body>
-      <p class="ok">✅ SERVIDOR OK!</p>
+      <p style="color: green; font-size: 32px; font-weight: bold;">✅ SERVIDOR OK!</p>
       <p>Hora: ${agora}</p>
-      <p>Se vês isto, Vercel funciona.</p>
-      <p>Problema é as APIs externas.</p>
+      <p>Se vês isto, Vercel funciona. Problema é APIs.</p>
     </body>
     </html>
   `);
 }
+```
+
+### 6. **Scroll até ao fim da página**
+
+### 7. **Clica "Commit Changes"**
+
+### 8. **Escreve mensagem:**
+```
+DEBUG: Handler minimalista
+```
+
+### 9. **Clica "Commit to main"**
+
+### 10. **Espera 30-40 segundos** (Vercel a fazer deploy)
+
+### 11. **Tenta aceder:**
+```
+https://ricardo-sentinela-deploy-lmgkg23e7.vercel.app
