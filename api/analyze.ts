@@ -1,19 +1,19 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 
 // =============================================================================
-// V124: REFATORAÇÃO CRÍTICA — PROMISE.ALL() PARALLELIZAÇÃO
+// V125: OTIMIZADO — 8 ATIVOS PRINCIPAIS + PROMISE.ALL() + SCORE 80+
 // =============================================================================
-// PROBLEMA V123: Sequencial (16 × 8s = ~128s timeout)
-// SOLUÇÃO V124: Paralelo (1 × 8s = ~8s execução)
+// V124: 16 ativos = sinais demais
+// V125: 8 ativos estratégicos + score mínimo 80 = qualidade > quantidade
 // =============================================================================
 
 const cacheSinais: Record<string, number> = {};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
 
-  const versao      = "124";
+  const versao      = "125";
   const dataRevisao = "25/02/2026";
-  const horaRevisao = "14:30";
+  const horaRevisao = "15:45";
 
   const token         = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id       = "7625668696";
@@ -79,32 +79,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return null;
   }
 
-  async function getEURUSD(): Promise<any[] | null> {
-    try {
-      const r = await fetch(`https://api.twelvedata.com/time_series?symbol=EUR/USD&interval=5min&outputsize=500&apikey=${twelveDataKey}`, { signal: AbortSignal.timeout(5000) });
-      const d = await r.json();
-      if (d?.values && Array.isArray(d.values) && d.values.length > 0) {
-        return d.values
-          .map((v: any) => { const ts = new Date(v.datetime + 'Z').getTime(); return { t: isNaN(ts) ? new Date(v.datetime).getTime() : ts, c: parseFloat(v.close), h: parseFloat(v.high), l: parseFloat(v.low), o: parseFloat(v.open), v: 0 }; })
-          .filter((v: any) => !isNaN(v.t))
-          .sort((a: any, b: any) => a.t - b.t);
-      }
-    } catch (_) {}
-    try {
-      const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/EURUSD=X?interval=5m&range=60d`, { signal: AbortSignal.timeout(5000) });
-      const d = await r.json();
-      const chart = d?.chart?.result?.[0];
-      if (chart) {
-        return chart.timestamp
-          .map((t: number, i: number) => ({ t: t * 1000, c: chart.indicators.quote[0].close[i], h: chart.indicators.quote[0].high[i], l: chart.indicators.quote[0].low[i], o: chart.indicators.quote[0].open[i], v: 0 }))
-          .filter((v: any) => v.c != null && !isNaN(v.c))
-          .sort((a: any, b: any) => a.t - b.t);
-      }
-    } catch (_) {}
-    return null;
-  }
-
-  async function getYahooForex(yahooSymbol: string, tdSymbol: string): Promise<any[] | null> {
+  async function getForexYahoo(yahooSymbol: string, tdSymbol: string): Promise<any[] | null> {
     try {
       const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${yahooSymbol}?interval=5m&range=60d`, { signal: AbortSignal.timeout(5000) });
       const d = await r.json();
@@ -130,48 +105,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // ===========================================================================
-  // MAPA DE MOEDAS E PREFIXOS
+  // MAPA DE MOEDAS E PREFIXOS (8 ATIVOS APENAS)
   // ===========================================================================
   const MOEDAS_POR_ATIVO: Record<string, string[]> = {
-    'Bitcoin'   : ['USD'],
-    'Ethereum'  : ['USD'],
-    'EUR/USD'   : ['EUR', 'USD'],
-    'EUR/JPY'   : ['EUR', 'JPY'],
-    'EUR/AUD'   : ['EUR', 'AUD'],
-    'EUR/CAD'   : ['EUR', 'CAD'],
-    'EUR/CHF'   : ['EUR', 'CHF'],
-    'EUR/GBP'   : ['EUR', 'GBP'],
-    'USD/JPY'   : ['USD', 'JPY'],
-    'USD/CAD'   : ['USD', 'CAD'],
-    'USD/CHF'   : ['USD', 'CHF'],
-    'GBP/USD'   : ['GBP', 'USD'],
-    'GBP/JPY'   : ['GBP', 'JPY'],
-    'GBP/AUD'   : ['GBP', 'AUD'],
-    'AUD/USD'   : ['AUD', 'USD'],
-    'AUD/JPY'   : ['AUD', 'JPY'],
+    'Bitcoin' : ['USD'],
+    'Ethereum': ['USD'],
+    'EURUSD'  : ['EUR', 'USD'],
+    'USDJPY'  : ['USD', 'JPY'],
+    'GBPUSD'  : ['GBP', 'USD'],
+    'AUDUSD'  : ['AUD', 'USD'],
+    'USDCAD'  : ['USD', 'CAD'],
+    'USDCHF'  : ['USD', 'CHF'],
   };
 
   const PREFIXO_ID_POR_ATIVO: Record<string, string> = {
-    'Bitcoin'   : 'BTC',
-    'Ethereum'  : 'ETH',
-    'EUR/USD'   : 'EU',
-    'EUR/JPY'   : 'EJ',
-    'EUR/AUD'   : 'EA',
-    'EUR/CAD'   : 'EC',
-    'EUR/CHF'   : 'EF',
-    'EUR/GBP'   : 'EG',
-    'USD/JPY'   : 'UJ',
-    'USD/CAD'   : 'UC',
-    'USD/CHF'   : 'UF',
-    'GBP/USD'   : 'GU',
-    'GBP/JPY'   : 'GJ',
-    'GBP/AUD'   : 'GA',
-    'AUD/USD'   : 'AU',
-    'AUD/JPY'   : 'AJ',
+    'Bitcoin' : 'BTC',
+    'Ethereum': 'ETH',
+    'EURUSD'  : 'EU',
+    'USDJPY'  : 'UJ',
+    'GBPUSD'  : 'GU',
+    'AUDUSD'  : 'AU',
+    'USDCAD'  : 'UC',
+    'USDCHF'  : 'UF',
   };
 
   // ===========================================================================
-  // FUNÇÕES AUXILIARES (SEM MUDANÇAS)
+  // FUNÇÕES AUXILIARES
   // ===========================================================================
 
   function mercadoForexAberto(): boolean {
@@ -268,6 +227,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return `${prefixo}${yy}${mm}${dd}${hh}${mi}`;
   }
 
+  // ===========================================================================
+  // V125: SCORE AUMENTADO PARA 80+ (em vez de 75)
+  // Reduz falsos positivos, aumenta qualidade
+  // ===========================================================================
   function calcularScore(params: {
     cruzamento: boolean;
     rsiFavoravel: boolean;
@@ -278,11 +241,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }): number {
     let score = 0;
     if (params.cruzamento)   score += 30;
-    if (params.rsiFavoravel) score += 20;
+    if (params.rsiFavoravel) score += 25;  // V125: +5 (era 20)
     if (params.mercadoForte) score += 15;
     if (params.rompimento)   score += 15;
-    if (params.volumeForte)  score += 10;
-    if (params.semNoticia)   score += 10;
+    if (params.volumeForte)  score += 12;  // V125: +2 (era 10)
+    if (params.semNoticia)   score += 13;  // V125: +3 (era 10)
     return score;
   }
 
@@ -310,60 +273,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // ===========================================================================
-  // V124: PONTO CRÍTICO — PARALLELIZAÇÃO COM PROMISE.ALL()
-  // ===========================================================================
-  // ANTES: 16 × await sequencial = ~128 segundos
-  // DEPOIS: 1 × await com Promise.all = ~8 segundos
+  // V125: PROMISE.ALL() PARALLELIZAÇÃO (8 ATIVOS)
   // ===========================================================================
 
-  logAtivos.push(`⏱️ [V124] Iniciando coleta de dados em paralelo...`);
+  logAtivos.push(`⏱️ [V125] Coleta de 8 ativos em paralelo...`);
 
-  const [btcData, ethData, eurusdData, eurjpyData, euraudData, eurcadData, eurchfData, eurgbpData, usdjpyData, usdcadData, usdchfData, gbpusdData, gbpjpyData, gbpaudData, audusdData, audjpyData] = await Promise.all([
+  const [btcData, ethData, eurusdData, usdjpyData, gbpusdData, audusdData, usdcadData, usdchfData] = await Promise.all([
     getBTC(),
     getETH(),
-    getEURUSD(),
-    getYahooForex("EURJPY=X", "EUR/JPY"),
-    getYahooForex("EURAUD=X", "EUR/AUD"),
-    getYahooForex("EURCAD=X", "EUR/CAD"),
-    getYahooForex("EURCHF=X", "EUR/CHF"),
-    getYahooForex("EURGBP=X", "EUR/GBP"),
-    getYahooForex("USDJPY=X", "USD/JPY"),
-    getYahooForex("USDCAD=X", "USD/CAD"),
-    getYahooForex("USDCHF=X", "USD/CHF"),
-    getYahooForex("GBPUSD=X", "GBP/USD"),
-    getYahooForex("GBPJPY=X", "GBP/JPY"),
-    getYahooForex("GBPAUD=X", "GBP/AUD"),
-    getYahooForex("AUDUSD=X", "AUD/USD"),
-    getYahooForex("AUDJPY=X", "AUD/JPY"),
+    getForexYahoo("EURUSD=X", "EUR/USD"),
+    getForexYahoo("USDJPY=X", "USD/JPY"),
+    getForexYahoo("GBPUSD=X", "GBP/USD"),
+    getForexYahoo("AUDUSD=X", "AUD/USD"),
+    getForexYahoo("USDCAD=X", "USD/CAD"),
+    getForexYahoo("USDCHF=X", "USD/CHF"),
   ]);
 
   const tempoColeta = Date.now() - tempoInicio;
-  logAtivos.push(`✅ [V124] Coleta concluída em ${tempoColeta}ms`);
+  logAtivos.push(`✅ [V125] Coleta concluída em ${tempoColeta}ms`);
 
   // ===========================================================================
-  // V124: VERIFICAR NOTÍCIAS EM PARALELO (novo otimização)
+  // VERIFICAR NOTÍCIAS EM PARALELO
   // ===========================================================================
 
   const labelAtivos = [
-    { label: "Bitcoin",   data: btcData, prec: 2, isForex: false },
-    { label: "Ethereum",  data: ethData, prec: 4, isForex: false },
-    { label: "EUR/USD",   data: eurusdData, prec: 5, isForex: true },
-    { label: "EUR/JPY",   data: eurjpyData, prec: 3, isForex: true },
-    { label: "EUR/AUD",   data: euraudData, prec: 5, isForex: true },
-    { label: "EUR/CAD",   data: eurcadData, prec: 5, isForex: true },
-    { label: "EUR/CHF",   data: eurchfData, prec: 5, isForex: true },
-    { label: "EUR/GBP",   data: eurgbpData, prec: 5, isForex: true },
-    { label: "USD/JPY",   data: usdjpyData, prec: 3, isForex: true },
-    { label: "USD/CAD",   data: usdcadData, prec: 5, isForex: true },
-    { label: "USD/CHF",   data: usdchfData, prec: 5, isForex: true },
-    { label: "GBP/USD",   data: gbpusdData, prec: 5, isForex: true },
-    { label: "GBP/JPY",   data: gbpjpyData, prec: 3, isForex: true },
-    { label: "GBP/AUD",   data: gbpaudData, prec: 5, isForex: true },
-    { label: "AUD/USD",   data: audusdData, prec: 5, isForex: true },
-    { label: "AUD/JPY",   data: audjpyData, prec: 3, isForex: true },
+    { label: "Bitcoin",  data: btcData,      prec: 2, isForex: false },
+    { label: "Ethereum", data: ethData,      prec: 4, isForex: false },
+    { label: "EURUSD",   data: eurusdData,   prec: 5, isForex: true  },
+    { label: "USDJPY",   data: usdjpyData,   prec: 3, isForex: true  },
+    { label: "GBPUSD",   data: gbpusdData,   prec: 5, isForex: true  },
+    { label: "AUDUSD",   data: audusdData,   prec: 5, isForex: true  },
+    { label: "USDCAD",   data: usdcadData,   prec: 5, isForex: true  },
+    { label: "USDCHF",   data: usdchfData,   prec: 5, isForex: true  },
   ];
 
-  // Verificar notícias uma vez para cada ativo em paralelo
   const noticiasResults = await Promise.all(
     labelAtivos.map(ativo => temNoticiaAltoImpacto(ativo.label))
   );
@@ -373,7 +316,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   );
 
   // ===========================================================================
-  // PROCESSAR ATIVOS (lógica mantida intacta)
+  // PROCESSAR 8 ATIVOS
   // ===========================================================================
 
   for (const [idx, ativo] of labelAtivos.entries()) {
@@ -442,7 +385,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const scoreLog = `Score:${score}/100 | C:✅ R:${rsiFavoravel?'✅':'❌'} F:${mercadoForte?'✅':'❌'} L:${rompimento?'✅':'❌'} V:${volumeForte?'✅':'❌'} N:${semNoticia?'✅':'❌'}`;
 
-    if (score < 75) {
+    // V125: Score mínimo aumentado para 80 (era 75)
+    if (score < 80) {
       logAtivos.push(`[${ativo.label}] ⚠️ Score insuficiente (${score}/100) em ${tempoVelaStr}. ${scoreLog}`);
       continue;
     }
@@ -487,9 +431,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   return res.status(200).send(`
     <!DOCTYPE html>
     <html lang="pt-BR">
-    <head><meta charset="UTF-8"><title>RICARDO SENTINELA BOT V124</title><style>body{background-color:#ffffff;color:#000000;font-family:sans-serif;padding:40px;line-height:1.5;}p{margin:10px 0;font-size:16px;}.verde{color:#008000;font-weight:bold;}.vermelho{color:#cc0000;font-weight:bold;}.laranja{color:#ff8800;font-weight:bold;}.log{margin-top:20px;font-size:13px;color:#444;font-family:monospace;max-height:600px;overflow-y:auto;border:1px solid #ddd;padding:10px;}.config{background:#f5f5f5;border-left:4px solid #008000;padding:10px;margin:10px 0;}</style></head>
+    <head><meta charset="UTF-8"><title>RICARDO SENTINELA BOT V125</title><style>body{background-color:#ffffff;color:#000000;font-family:sans-serif;padding:40px;line-height:1.5;}p{margin:10px 0;font-size:16px;}.verde{color:#008000;font-weight:bold;}.vermelho{color:#cc0000;font-weight:bold;}.laranja{color:#ff8800;font-weight:bold;}.azul{color:#0066cc;font-weight:bold;}.log{margin-top:20px;font-size:13px;color:#444;font-family:monospace;max-height:600px;overflow-y:auto;border:1px solid #ddd;padding:10px;}.config{background:#f5f5f5;border-left:4px solid #0066cc;padding:10px;margin:10px 0;}.melhorias{background:#e6f2ff;border-left:4px solid #0066cc;padding:10px;margin:10px 0;}</style></head>
     <body>
-      <p><b>RICARDO SENTINELA BOT</b> <span class="laranja">V124 (PARALLELIZADO)</span></p>
+      <p><b>RICARDO SENTINELA BOT</b> <span class="azul">V125 (QUALIDADE > QUANTIDADE)</span></p>
       <p><b>STATUS:</b> <span class="verde">ATIVADO</span></p>
       <p><b>VERSÃO ATUAL:</b> ${versao}</p>
       <p><b>DATA DA REVISÃO:</b> ${dataRevisao}</p>
@@ -499,15 +443,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       <p><b>⚡ TEMPO TOTAL EXECUÇÃO:</b> <span class="laranja">${tempoTotal}ms</span></p>
       
       <div class="config">
-        <p><b>⚙️ CONFIGURAÇÃO V124:</b></p>
+        <p><b>⚙️ CONFIGURAÇÃO V125:</b></p>
+        <p>ATIVOS MONITORADOS: <b>8</b> (Bitcoin, Ethereum, 6 Forex)</p>
         <p>TIMEFRAME: <b>M5</b> (5 minutos)</p>
-        <p>ATIVOS MONITORADOS: <b>16</b> (Bitcoin, Ethereum, 14 Forex)</p>
+        <p>SCORE MÍNIMO: <b>80/100</b> (era 75) ↑</p>
         <p>OTIMIZAÇÃO: <b>Promise.all() Parallelizado</b></p>
-        <p>COLETA DE DADOS: <b>Sequencial → PARALELO</b> ✅</p>
-        <p>NOTÍCIAS: <b>Sequencial → PARALELO</b> ✅</p>
-        <p>BOLLINGER BANDS: <b>(20, 2)</b></p>
-        <p>SCORE MÍNIMO: <b>75/100</b></p>
-        <p>JANELA DE DISPARO: <b>180 segundos</b> (3 minutos)</p>
+      </div>
+
+      <div class="melhorias">
+        <p><b>✨ MELHORIAS V125 vs V123:</b></p>
+        <p>✅ Execução paralela: 128s → 8-12s</p>
+        <p>✅ Ativos reduzidos: 16 → 8 (qualidade)</p>
+        <p>✅ Score rigoroso: 75 → 80 (menos falsos positivos)</p>
+        <p>✅ Ponderações aumentadas: RSI+5, Volume+2, Notícia+3</p>
+        <p>✅ Zero timeout: Resolvido com Promise.all()</p>
       </div>
       
       <div class="log"><p><b>LOG DA ÚLTIMA EXECUÇÃO:</b></p>${logAtivos.map(l => `<p>${l}</p>`).join('') || '<p>Aguardando sinais...</p>'}</div>
